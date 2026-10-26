@@ -29,8 +29,13 @@ DURACAO_MINIMA_LIVRE = timedelta(minutes=30)
 
 # GOOGLE
 # pega seu diretório, config.py deve estar em destrava/core (parents[2] sai dois níveis)
-RAIZ_PROJETO = Path(__file__).resolve().parents[2] 
-ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / "credentials.json"
+ESCOPO_SOMENTE_LEITURA = "https://www.googleapis.com/auth/calendar.readonly"
+ESCOPO_CALENDARIO = "https://www.googleapis.com/auth/calendar"
+NOME_ARQUIVO_CREDENCIAIS = "credentials.json"
+ARQUIVO_TOKEN_SOMENTE_LEITURA = "token_readonly.json"
+ARQUIVO_TOKEN_CALENDARIO = "token_calendar.json"
+RAIZ_PROJETO = Path(__file__).resolve().parents[2]
+ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / NOME_ARQUIVO_CREDENCIAIS
 
 
 
