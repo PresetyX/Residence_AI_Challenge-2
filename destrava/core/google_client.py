@@ -64,6 +64,7 @@ def get_service(
             "Baixe-o no Google Cloud Console antes de executar o teste."
         )
 
+    credentials: Credentials | None = None
     if caminho_token.exists():
         credentials = Credentials.from_authorized_user_file(
             str(caminho_token), escopos_solicitados
