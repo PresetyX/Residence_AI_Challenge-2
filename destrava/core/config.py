@@ -1,0 +1,42 @@
+# Configurações globais do projeto.
+#
+# O que este arquivo guarda (somente valores, sem lógica):
+#   - Fuso horário (ex.: America/Sao_Paulo)
+#   - Horário de acordar e de dormir (período em que se procura horário livre)
+#   - Nome do modelo usado no Ollama (ex.: gemma2:2b para desenvolver, gemma2:9b para o final)
+#
+# Decisões do grupo:
+#   - Trocar de modelo é mudar apenas o nome aqui; llm_client.py lê este valor.
+#   - O escopo do OAuth NÃO fica aqui: cada agente informa o escopo de que precisa
+#     ao chamar get_service() (ver google_client.py).
+#   - Regras de negócio de cada agente ficam no próprio agente, não aqui.
+
+
+from datetime import time, timedelta
+from zoneinfo import ZoneInfo
+from pathlib import Path
+
+# MODELO
+MODELO = "gemma2:2b"            # depois: "gemma2:9b"
+OLLAMA_URL = "http://localhost:11434"
+TIMEOUT_LLM = 120
+
+# ROTINA
+FUSO = ZoneInfo("America/Sao_Paulo")
+HORARIO_ACORDAR = time(6, 0)
+HORARIO_DORMIR = time(22, 0)
+DURACAO_MINIMA_LIVRE = timedelta(minutes=30)
+
+# GOOGLE
+# pega seu diretório, config.py deve estar em destrava/core (parents[2] sai dois níveis)
+ESCOPO_SOMENTE_LEITURA = "https://www.googleapis.com/auth/calendar.readonly"
+ESCOPO_CALENDARIO = "https://www.googleapis.com/auth/calendar"
+NOME_ARQUIVO_CREDENCIAIS = "credentials.json"
+ARQUIVO_TOKEN_SOMENTE_LEITURA = "token_readonly.json"
+ARQUIVO_TOKEN_CALENDARIO = "token_calendar.json"
+RAIZ_PROJETO = Path(__file__).resolve().parents[2]
+ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / NOME_ARQUIVO_CREDENCIAIS
+
+
+
+

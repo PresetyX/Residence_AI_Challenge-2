@@ -1,0 +1,13 @@
+# Credenciais do Google (NUNCA commitar)
+credentials.json
+token*.json
+
+# Variáveis de ambiente
+.env
+
+# Ambiente virtual
+.venv/
+
+# Cache do Python
+__pycache__/
+*.pyc
