@@ -5,8 +5,8 @@
 
 ## Objetivo
 
-Altera um evento existente da agenda a partir de um pedido em linguagem natural.
-*Escreva em 2 ou 3 linhas o que o agente faz e o que não faz.*
+Altera eventos existentes a partir de um pedido em linguagem natural. O agente
+preserva os campos não solicitados e nunca cria ou exclui eventos.
 
 ## Contrato
 
@@ -14,9 +14,9 @@ O que entra e o que sai, para o supervisor saber como chamá-lo.
 
 | | |
 |---|---|
-| **Entrada** | texto: o pedido do usuário (ex.: "mude a reunião de sexta para as 16h") |
-| **Saída** | texto em português confirmando o resultado |
-| **Função de entrada** | `editar_evento_agenda(pedido: str) -> str` *(nome sugerido; confirmar com o grupo)* |
+| **Entrada** | texto: o pedido do usuário (ex.: "altere o título do evento abc123 para Reunião") |
+| **Saída** | `{"evento": evento atualizado, "alteracoes": alterações aplicadas}` |
+| **Função de entrada** | `editar_evento_agenda(servico, pedido) -> dict[str, Any]` |
 
 ## Fluxo
 
@@ -24,31 +24,48 @@ Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
 
 | # | Passo | Quem |
 |---|---|---|
-| 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
-| 2 | Localiza o evento e aplica a alteração no Google Agenda | Código |
-| 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
-
-*Ajuste os passos se o seu agente tiver mais etapas.*
+| 1 | Extrai o ID e as alterações do pedido em JSON (`PROMPT_EXTRACAO`) | LLM |
+| 2 | Executa `get_evento` para obter a versão atual | Código |
+| 3 | Mescla as alterações e executa `update_evento` | Código |
+| 4 | Retorna o evento atualizado e as alterações aplicadas | Código |
 
 ## Regras
 
-*Defina as regras do agente.* Exemplos de decisões: como identificar o evento certo (título, data); o que fazer se houver mais de um candidato; quais campos podem ser alterados.
+- Cada item recebido deve ter `id` e `alteracoes`.
+- Para linguagem natural, use `editar_evento_agenda(servico, pedido)`.
+- Exemplos aceitos: `altere o título do evento abc123 para Reunião` e
+  `altere a data de término do evento abc123 para 2026-10-28 às 18:00`.
+- O GET sempre ocorre antes do UPDATE, evitando sobrescrever uma versão
+  desatualizada do evento.
+- Campos não incluídos em `alteracoes` são preservados.
+- O agente não resolve ambiguidades silenciosamente: o LLM deve retornar
+  `null` quando não conseguir identificar um único evento.
+- Tarefas do Google Tasks exibidas no Calendar não são editáveis por este
+  agente. Elas devem ser alteradas pela Google Tasks API.
 
 Os valores compartilhados (fuso, horários) estão em `destrava/core/config.py`.
 
 ## Dependências do core
 
-- `google_client`: `get_service` com o escopo de **escrita** (`calendar`).
+- `google_client`: `get_service` com o escopo de **escrita** (`calendar`),
+  `get_evento` e `update_evento`.
 - `llm_client`: `perguntar(prompt)`.
-- `config`: *liste só o que este agente usa.*
-- `prompts/editar.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
+- `config`: `ESCOPO_CALENDARIO`
+- `prompts/editar.py`: `PROMPT_EXTRACAO`.
 
 ## Como testar
 
-*Preencha quando o agente estiver rodando: o que precisa estar ativo e 3 a 5 pedidos de exemplo com o resultado esperado.*
+```python
+from destrava.agents.editar import editar_evento_agenda
+resultado = editar_evento_agenda(
+  servico,
+  f"altere o título do evento {evento['id']} para 'Reunião' e mude a data de término para as 18h",
+)
+```
 
 ## Limitações
 
 - Não guarda memória entre perguntas.
 - Altera a agenda: exige o escopo de escrita.
-- *Acrescente as limitações reais que aparecerem.*
+- Pode alucinar se o pedido não for claro.
+- Causa uma exceção se o evento não existir.

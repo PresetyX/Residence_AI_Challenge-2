@@ -64,6 +64,7 @@ def get_service(
             "Baixe-o no Google Cloud Console antes de executar o teste."
         )
 
+    credentials: Credentials | None = None
     if caminho_token.exists():
         credentials = Credentials.from_authorized_user_file(
             str(caminho_token), escopos_solicitados
@@ -130,3 +131,50 @@ def listar_eventos(
         token_pagina = resultado_eventos.get("nextPageToken")
         if not token_pagina:
             return eventos
+
+
+def get_evento(
+    servico: Resource,
+    evento_id: str,
+    *,
+    id_calendario: str = "primary",
+) -> dict[str, Any]:
+    """Busca um evento completo pelo ID no Google Calendar."""
+    if not isinstance(evento_id, str) or not evento_id.strip():
+        raise ValueError("evento_id deve ser uma string não vazia.")
+
+    resultado = (
+        servico.events()
+        .get(calendarId=id_calendario, eventId=evento_id)
+        .execute()
+    )
+    if not isinstance(resultado, dict):
+        raise TypeError("A API do Google Calendar retornou um evento inválido.")
+    return resultado
+
+
+def update_evento(
+    servico: Resource,
+    evento_id: str,
+    evento: dict[str, Any],
+    *,
+    id_calendario: str = "primary",
+) -> dict[str, Any]:
+    """Atualiza um evento completo e retorna a versão salva pela API."""
+    if not isinstance(evento_id, str) or not evento_id.strip():
+        raise ValueError("evento_id deve ser uma string não vazia.")
+    if not isinstance(evento, dict):
+        raise TypeError("evento deve ser um dicionário.")
+
+    resultado = (
+        servico.events()
+        .update(
+            calendarId=id_calendario,
+            eventId=evento_id,
+            body=evento,
+        )
+        .execute()
+    )
+    if not isinstance(resultado, dict):
+        raise TypeError("A API do Google Calendar retornou um evento inválido.")
+    return resultado
