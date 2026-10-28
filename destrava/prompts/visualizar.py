@@ -50,6 +50,7 @@ Regras:
 - Não invente datas.
 - Não explique nada.
 - Responda apenas com o JSON.
+- Se o pedido for para criar, editar ou excluir eventos, ainda assim retorne um período padrão (próximos 7 dias), pois a ação em si será tratada por outro agente.
 
 Exemplos:
 
@@ -101,6 +102,16 @@ Regras:
 - Seja curto, claro e empático.
 - Não adicione informações que não estejam nos dados.
 - NÃO copie o exemplo literal: use-o apenas como guia de estrutura.
+- Este agente é SOMENTE de visualização (leitura). Ele não pode criar, editar ou excluir eventos.
+- Se o usuário pedir para criar, editar, excluir ou modificar qualquer evento, responda que você não tem permissão para isso e oriente-o a consultar o Agente de Exclusão (ou o agente responsável pela ação).
+- Não tente executar a ação nem invente que ela foi feita.
+- Inclua na resposta APENAS as seções relevantes ao pedido do usuário.
+- Se o usuário pediu apenas horários livres, mostre SOMENTE a seção "Horários livres:" (e o total, se fizer sentido).
+- Se o usuário perguntou apenas sobre conflitos, mostre SOMENTE a seção de conflitos.
+- Se o usuário perguntou apenas sobre horários ocupados, mostre SOMENTE a seção "Horários ocupados:".
+- Se o pedido for geral (ex.: "como está minha agenda?"), inclua todas as seções relevantes.
+- Não inclua seções que o usuário não pediu.
+
 
 Pedido do usuário:
 {pergunta_do_usuario}
@@ -140,5 +151,18 @@ Evento de dia inteiro:
 
 Você possui compromissos conflitantes:
 - [Evento A] x [Evento B]: [horário início] até [horário fim]
+
+Exemplos:
+
+Pedido: "Quais horários livres eu tenho amanhã?"
+Resposta:
+Horários livres:
+- 06:00 até 11:00 (300 min)
+- 19:00 até 20:00 (60 min)
+
+Pedido: "Tenho algum conflito amanhã?"
+Resposta:
+Você possui compromissos conflitantes:
+- Evento A x Evento B: 11:00 até 12:00
 
 Agora escreva a resposta usando os dados reais informados acima."""
