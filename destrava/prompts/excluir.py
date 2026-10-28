@@ -25,3 +25,75 @@
 #   - A data de hoje NUNCA é fixa: usar a lacuna {data_de_hoje}, preenchida pelo código.
 #   - Quem cuida deste agente edita só este arquivo. As lacunas listadas acima são
 #     uma sugestão inicial, o dono do agente pode ajustar.
+"""Prompts usados pelo agente de exclusão de eventos."""
+
+
+PROMPT_EXTRACAO = """
+Você faz parte de um agente que exclui eventos do Google Calendar.
+Sua única tarefa neste passo é interpretar o pedido do usuário e devolver os
+dados necessários para o código localizar o evento.
+
+Data de hoje: {data_de_hoje}
+Fuso horário: {fuso}
+Pedido do usuário: {pergunta_do_usuario}
+
+Retorne APENAS um objeto JSON válido, sem markdown, sem explicações e sem texto
+antes ou depois do JSON, exatamente com estas chaves:
+
+{{
+  "titulo": "texto do título ou null",
+  "data": "AAAA-MM-DD ou null",
+  "horario": "HH:MM ou null"
+}}
+
+Regras:
+- "titulo" deve conter somente a parte do pedido que identifica o evento.
+- Resolva datas relativas usando a data de hoje informada acima.
+  Exemplos: hoje, amanhã, depois de amanhã, sexta-feira.
+- "data" deve ser uma data absoluta no formato AAAA-MM-DD.
+- Preencha "horario" somente quando o usuário informar ou deixar um horário
+  claramente identificável. Caso contrário, use null.
+- Não invente data, horário ou título.
+- Se o usuário não informar uma data e ela não puder ser inferida, use null.
+- Se o usuário não informar um título, use null.
+- Não decida se o evento existe e não diga se ele deve ser excluído. O código
+  fará essa verificação no Google Calendar.
+
+Exemplos:
+
+Data de hoje: 2026-10-27
+Pedido: cancele o dentista de amanhã
+Saída:
+{{"titulo":"dentista","data":"2026-10-28","horario":null}}
+
+Data de hoje: 2026-10-27
+Pedido: apague a reunião Projeto IA de hoje às 14h
+Saída:
+{{"titulo":"reunião Projeto IA","data":"2026-10-27","horario":"14:00"}}
+
+Data de hoje: 2026-10-27
+Pedido: remova academia
+Saída:
+{{"titulo":"academia","data":null,"horario":null}}
+""".strip()
+
+
+PROMPT_RESPOSTA = """
+Você escreve a resposta final de um agente que acabou de excluir um evento do
+Google Calendar.
+
+Pedido original do usuário:
+{pergunta_do_usuario}
+
+Dados do evento que o código realmente excluiu:
+{evento_excluido}
+
+Escreva uma confirmação curta e natural em português brasileiro, com no máximo
+duas frases.
+
+Regras:
+- Use SOMENTE os dados informados acima.
+- Não invente título, data, horário ou qualquer outra informação.
+- Deixe claro que o evento foi excluído.
+- Não mencione JSON, API, código, modelo ou detalhes técnicos.
+""".strip()
