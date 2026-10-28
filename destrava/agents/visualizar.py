@@ -1,20 +1,16 @@
 """
 Agente de visualização da agenda.
 
-
 Busca os eventos do Google Agenda (somente leitura) e calcula ocupados,
 livres e conflitos com o core/agenda_engine.py.
-
 
 Contrato final: recebe o pedido do usuário em texto, extrai o período com o
 LLM (PROMPT_EXTRACAO), busca os eventos, calcula a visualização e devolve
 um texto em português com o resumo (PROMPT_RESPOSTA).
 """
 
-
 import json
 from datetime import date, datetime, time, timedelta
-
 
 from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
@@ -23,10 +19,21 @@ from destrava.core.llm_client import perguntar
 from destrava.prompts.visualizar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
+PALAVRAS_DE_ACAO = (
+    "exclua", "excluir", "apague", "apagar", "delete", "deletar",
+    "crie", "criar", "adicione", "adicionar", "edite", "editar",
+    "modifique", "modificar", "remova", "remover",
+)
+
+
+def _pede_acao(pergunta: str) -> bool:
+    """Verifica se o usuário está pedindo uma ação (criar/editar/excluir)."""
+    texto = pergunta.lower()
+    return any(palavra in texto for palavra in PALAVRAS_DE_ACAO)
+
 
 def converter_evento_google(evento: dict) -> dict | None:
     """Converte um evento da API do Google para o formato do ``Bloco``.
-
 
     - Evento com horário (``dateTime``): tipo "evento".
     - Evento de dia inteiro (só ``date``): tipo "dia_inteiro", de 00:00 do
@@ -34,14 +41,12 @@ def converter_evento_google(evento: dict) -> dict | None:
       fim como o dia seguinte (fim exclusivo), então ele é usado direto.
       Se ele ocupa horário ou não é decidido por config.DIA_INTEIRO_BLOQUEIA.
 
-
     Returns:
         Dicionário com id, titulo, inicio, fim e tipo, ou None se o evento
         não tiver início e fim.
     """
     inicio_google = evento.get("start", {})
     fim_google = evento.get("end", {})
-
 
     if inicio_google.get("dateTime") and fim_google.get("dateTime"):
         inicio = datetime.fromisoformat(
@@ -60,7 +65,6 @@ def converter_evento_google(evento: dict) -> dict | None:
     else:
         return None
 
-
     return {
         "id": evento.get("id", ""),
         "titulo": evento.get("summary", "Compromisso"),
@@ -70,18 +74,14 @@ def converter_evento_google(evento: dict) -> dict | None:
     }
 
 
-
 def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
     """Usa o LLM para transformar o pedido em um período de datas.
-
 
     Args:
         pergunta: pedido do usuário em texto livre.
 
-
     Returns:
         Tupla (inicio, fim) já normalizada no fuso do projeto.
-
 
     Se o modelo não devolver um JSON válido, usa os próximos 7 dias
     como fallback seguro.
@@ -89,16 +89,13 @@ def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
     hoje = datetime.now(config.FUSO)
     hoje_iso = hoje.date().isoformat()
 
-
     prompt = PROMPT_EXTRACAO.format(
         data_de_hoje=hoje_iso,
         fuso=str(config.FUSO),
         pergunta_do_usuario=pergunta,
     )
 
-
     resposta = perguntar(prompt)
-
 
     try:
         dados = json.loads(resposta)
@@ -109,49 +106,37 @@ def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
         inicio = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
         fim = inicio + timedelta(days=7)
 
-
     return normalizar_fuso(inicio), normalizar_fuso(fim)
-
 
 
 class AgenteVisualizar:
     """Agente de visualização: ocupados, livres e conflitos de um período."""
 
-
     def executar(self, inicio: datetime, fim: datetime) -> dict:
         """Busca os eventos do período e devolve a visualização.
-
 
         Args:
             inicio: começo do período (sem fuso = horário de config.FUSO).
             fim: fim do período.
 
-
         Returns:
             Dicionário com ocupados, livres, conflitos e totais em minutos.
-
 
         Raises:
             ValueError: se ``fim`` não for posterior a ``inicio``.
 
-
         Escopo OAuth: somente leitura (config.ESCOPO_SOMENTE_LEITURA).
         """
-        # As datas vão para o Google já com o fuso do projeto; sem fuso,
-        # o listar_eventos as trataria como UTC (3 horas de diferença).
         inicio = normalizar_fuso(inicio)
         fim = normalizar_fuso(fim)
 
-
         if fim <= inicio:
             raise ValueError("A data final deve ser posterior à inicial.")
-
 
         servico = get_service([config.ESCOPO_SOMENTE_LEITURA])
         eventos_google = listar_eventos(
             servico, inicio.isoformat(), fim.isoformat()
         )
-
 
         eventos = [
             evento
@@ -159,38 +144,33 @@ class AgenteVisualizar:
             if evento is not None
         ]
 
-
         visualizacao = montar_visualizacao(eventos=eventos, inicio=inicio, fim=fim)
 
-
         return visualizacao.model_dump(mode="json")
-
 
     def executar_por_texto(self, pergunta: str) -> str:
         """Contrato final do agente: recebe texto e devolve texto.
 
-
         Fluxo:
-            1. extrair_periodo() -> LLM entende o pedido e devolve datas.
-            2. executar() -> busca eventos e calcula livres/conflitos.
-            3. responder() -> LLM redige a resposta final.
-
+            1. Verifica se o pedido é de ação (criar/editar/excluir).
+            2. Se for, responde que não tem permissão.
+            3. Senão, extrai o período, busca eventos e responde.
 
         Args:
             pergunta: pedido do usuário em texto livre.
 
-
         Returns:
             Texto curto em português com o resumo da agenda.
         """
+        if _pede_acao(pergunta):
+            return (
+                "Não tenho permissão para criar, editar ou excluir eventos. "
+                "Por favor, consulte o Agente de Exclusão para realizar essa ação."
+            )
+
         inicio, fim = extrair_periodo(pergunta)
-
-
         resultado = self.executar(inicio, fim)
-
-
         return responder(pergunta, resultado)
-
 
 
 def _formatar_horario(texto_iso: str) -> str:
@@ -198,38 +178,21 @@ def _formatar_horario(texto_iso: str) -> str:
     return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
 
 
-
 def _formatar_dia_inteiro(bloco: dict) -> str:
-    """Formata um evento de dia inteiro: '29/10 (dia inteiro): Feriado'.
-
-
-    O fim é exclusivo (00:00 do dia seguinte), por isso o último dia
-    mostrado é o anterior a ele.
-    """
+    """Formata um evento de dia inteiro: '29/10 (dia inteiro): Feriado'."""
     primeiro = datetime.fromisoformat(bloco["inicio"]).date()
     ultimo = (datetime.fromisoformat(bloco["fim"]) - timedelta(seconds=1)).date()
     dias = primeiro.strftime("%d/%m")
 
-
     if ultimo != primeiro:
         dias += f" a {ultimo.strftime('%d/%m')}"
-
 
     return f"- {dias} (dia inteiro): {bloco['titulo']}"
 
 
-
 def formatar_para_prompt(resultado: dict) -> dict[str, str]:
+    """Transforma o resultado do executar() em listas de texto para o prompt."""
 
-
-    
-    """Transforma o resultado do executar() em listas de texto para o prompt.
-
-
-    O Gemma entende melhor uma lista legível do que JSON. Nos conflitos,
-    troca o id do evento pelo título, para a resposta citar nomes.
-    Eventos de dia inteiro vão para uma lista separada ("dia_inteiro").
-    """
     ocupados = [
         f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
         for b in resultado["ocupados"]
@@ -251,7 +214,7 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
             return "cheia"
         if total_livres <= 240:
             return "média"
-        return "livre"
+        return "curta"
 
     titulos = {b["id"]: b["titulo"] for b in resultado["ocupados"]}
     conflitos = [
@@ -273,26 +236,56 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
     }
 
 
-
-
 def responder(pergunta: str, resultado: dict) -> str:
-    """Pede ao LLM uma resposta em português usando só os dados calculados.
+    dados = formatar_para_prompt(resultado)
 
+    quer_livres = _pede_livres(pergunta)
+    quer_conflitos = _pede_conflitos(pergunta)
+    quer_ocupados = _pede_ocupados(pergunta)
 
-    Args:
-        pergunta: o pedido do usuário, em texto.
-        resultado: o dicionário devolvido por AgenteVisualizar.executar().
+    # Se não pediu nada específico, mostra tudo
+    if not (quer_livres or quer_conflitos or quer_ocupados):
+        quer_livres = quer_conflitos = quer_ocupados = True
 
+    secoes = []
+    if quer_ocupados:
+        secoes.append(f"Horários ocupados:\n{dados['eventos']}")
+        if dados["dia_inteiro"] != "- Nenhum":
+            secoes.append(f"Eventos de dia inteiro:\n{dados['dia_inteiro']}")
+    if quer_livres:
+        secoes.append(f"Horários livres:\n{dados['livres']}")
+        secoes.append(f"Total de minutos livres:\n{dados['total_livres']}")
+        secoes.append(f"Classificação da agenda:\n{dados['classificacao']}")
+    if quer_conflitos:
+        secoes.append(f"Conflitos:\n{dados['conflitos']}")
 
-    Returns:
-        Texto curto em português explicando a agenda.
+    contexto = "\n\n".join(secoes)
 
+    prompt = f"""Você é o Agente de Visualização do Destrava.
 
-    Raises:
-        ErroLLM: se o modelo não responder.
-    """
-    prompt = PROMPT_RESPOSTA.format(
-        pergunta_do_usuario=pergunta,
-        **formatar_para_prompt(resultado),
-    )
+Responda ao pedido do usuário usando SOMENTE os dados abaixo.
+Inclua apenas as seções presentes nos dados — não invente seções que não foram informadas.
+
+Pedido do usuário:
+{pergunta}
+
+Dados disponíveis:
+{contexto}
+
+Responda em português brasileiro, de forma curta e clara. Não invente nada."""
+
     return perguntar(prompt)
+
+def _pede_livres(pergunta: str) -> bool:
+    texto = pergunta.lower()
+    return any(p in texto for p in ("livre", "livres", "disponível", "disponivel", "vago", "vagos"))
+
+
+def _pede_conflitos(pergunta: str) -> bool:
+    texto = pergunta.lower()
+    return any(p in texto for p in ("conflit", "sobrepõe", "sobrepoe", "colide", "colidem"))
+
+
+def _pede_ocupados(pergunta: str) -> bool:
+    texto = pergunta.lower()
+    return any(p in texto for p in ("ocupado", "ocupados", "compromisso", "compromissos", "evento", "eventos", "agenda"))
