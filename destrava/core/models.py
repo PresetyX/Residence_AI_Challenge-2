@@ -12,13 +12,13 @@ from pydantic import BaseModel
 
 
 class Bloco(BaseModel):
-    """Um intervalo de tempo ocupado: um evento da agenda ou o sono."""
+    """Um intervalo de tempo da agenda: um evento, um evento de dia inteiro ou o sono."""
 
     id: str
     titulo: str
     inicio: datetime
     fim: datetime
-    tipo: Literal["sono", "evento", "manual"] = "evento"
+    tipo: Literal["sono", "evento", "dia_inteiro", "manual"] = "evento"
 
 
 class HorarioLivre(BaseModel):

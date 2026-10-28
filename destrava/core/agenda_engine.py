@@ -5,7 +5,8 @@ Fica no core (e não em um agente) porque pode ser reaproveitado por mais de
 um agente (ex.: o de criar pode checar conflitos antes de marcar um evento).
 
 Usa os valores de config.py:
-    FUSO, HORARIO_ACORDAR, HORARIO_DORMIR, DURACAO_MINIMA_LIVRE
+    FUSO, HORARIO_ACORDAR, HORARIO_DORMIR, DURACAO_MINIMA_LIVRE,
+    DIA_INTEIRO_BLOQUEIA
 
 Não chama APIs nem LLM: só recebe eventos e devolve cálculos.
 """
@@ -181,9 +182,13 @@ def montar_visualizacao(
         Visualizacao com:
             - ocupados: cada evento e cada bloco de sono, separados e em ordem
               (eventos sobrepostos continuam aparecendo cada um com seu título);
+              eventos de dia inteiro sempre aparecem aqui, com tipo "dia_inteiro";
             - livres: lacunas com pelo menos DURACAO_MINIMA_LIVRE;
             - conflitos: pares de eventos sobrepostos;
             - totais em minutos (sem contar tempo sobreposto duas vezes).
+
+        Eventos de dia inteiro só tiram horários livres, geram conflitos e
+        entram no total ocupado se config.DIA_INTEIRO_BLOQUEIA for True.
 
     Raises:
         ValueError: se ``fim`` não for posterior a ``inicio``.
@@ -212,13 +217,22 @@ def montar_visualizacao(
     blocos_sono = gerar_blocos_sono(inicio, fim)
     ocupados = sorted(blocos_eventos + blocos_sono, key=lambda bloco: bloco.inicio)
 
-    livres = calcular_horarios_livres(ocupados, inicio, fim)
-    conflitos = encontrar_conflitos(blocos_eventos)
+    # Eventos que realmente ocupam horário (o de dia inteiro depende do config).
+    eventos_que_bloqueiam = [
+        bloco
+        for bloco in blocos_eventos
+        if bloco.tipo != "dia_inteiro" or config.DIA_INTEIRO_BLOQUEIA
+    ]
+
+    livres = calcular_horarios_livres(
+        eventos_que_bloqueiam + blocos_sono, inicio, fim
+    )
+    conflitos = encontrar_conflitos(eventos_que_bloqueiam)
 
     total_livres = sum(livre.duracao_minutos for livre in livres)
     total_ocupados = sum(
         (bloco.fim - bloco.inicio).total_seconds() / 60
-        for bloco in unir_blocos(ocupados)
+        for bloco in unir_blocos(eventos_que_bloqueiam + blocos_sono)
     )
 
     return Visualizacao(

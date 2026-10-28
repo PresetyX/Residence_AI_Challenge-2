@@ -38,6 +38,11 @@ FUSO = ZoneInfo("America/Sao_Paulo")
 HORARIO_ACORDAR = time(6, 0)
 HORARIO_DORMIR = time(22, 0)
 DURACAO_MINIMA_LIVRE = timedelta(minutes=30)
+# Eventos de dia inteiro (feriado, aniversário, viagem) sempre aparecem na lista.
+# False: não ocupam horário (não tiram horários livres nem geram conflitos).
+#        É o padrão do Google, que marca esses eventos como "disponível".
+# True:  ocupam o dia todo, como um evento normal.
+DIA_INTEIRO_BLOQUEIA = False
 
 # GOOGLE
 # pega seu diretório, config.py deve estar em destrava/core (parents[2] sai dois níveis)

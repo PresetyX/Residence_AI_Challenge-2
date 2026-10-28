@@ -9,7 +9,7 @@ Ainda falta a parte do LLM (extrair o período do pedido em texto e
 redigir a resposta final), para chegar ao contrato "texto entra, texto sai".
 """
 
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 
 from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
@@ -21,26 +21,42 @@ from destrava.prompts.visualizar import PROMPT_RESPOSTA
 def converter_evento_google(evento: dict) -> dict | None:
     """Converte um evento da API do Google para o formato do ``Bloco``.
 
-    Eventos de dia inteiro (que só têm ``date``, sem ``dateTime``) são
-    ignorados: costumam ser feriados, aniversários ou lembretes e, por
-    padrão, não bloqueiam horário na agenda.
+    - Evento com horário (``dateTime``): tipo "evento".
+    - Evento de dia inteiro (só ``date``): tipo "dia_inteiro", de 00:00 do
+      primeiro dia até 00:00 do dia seguinte ao último. O Google já envia o
+      fim como o dia seguinte (fim exclusivo), então ele é usado direto.
+      Se ele ocupa horário ou não é decidido por config.DIA_INTEIRO_BLOQUEIA.
 
     Returns:
         Dicionário com id, titulo, inicio, fim e tipo, ou None se o evento
-        for de dia inteiro ou não tiver início e fim.
+        não tiver início e fim.
     """
-    inicio = evento.get("start", {}).get("dateTime")
-    fim = evento.get("end", {}).get("dateTime")
+    inicio_google = evento.get("start", {})
+    fim_google = evento.get("end", {})
 
-    if not inicio or not fim:
+    if inicio_google.get("dateTime") and fim_google.get("dateTime"):
+        inicio = datetime.fromisoformat(
+            inicio_google["dateTime"].replace("Z", "+00:00")
+        )
+        fim = datetime.fromisoformat(fim_google["dateTime"].replace("Z", "+00:00"))
+        tipo = "evento"
+    elif inicio_google.get("date") and fim_google.get("date"):
+        inicio = datetime.combine(
+            date.fromisoformat(inicio_google["date"]), time.min, tzinfo=config.FUSO
+        )
+        fim = datetime.combine(
+            date.fromisoformat(fim_google["date"]), time.min, tzinfo=config.FUSO
+        )
+        tipo = "dia_inteiro"
+    else:
         return None
 
     return {
         "id": evento.get("id", ""),
         "titulo": evento.get("summary", "Compromisso"),
-        "inicio": datetime.fromisoformat(inicio.replace("Z", "+00:00")),
-        "fim": datetime.fromisoformat(fim.replace("Z", "+00:00")),
-        "tipo": "evento",
+        "inicio": inicio,
+        "fim": fim,
+        "tipo": tipo,
     }
 
 
@@ -90,14 +106,33 @@ def _formatar_horario(texto_iso: str) -> str:
     return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
 
 
+def _formatar_dia_inteiro(bloco: dict) -> str:
+    """Formata um evento de dia inteiro: '29/10 (dia inteiro): Feriado'.
+
+    O fim é exclusivo (00:00 do dia seguinte), por isso o último dia
+    mostrado é o anterior a ele.
+    """
+    primeiro = datetime.fromisoformat(bloco["inicio"]).date()
+    ultimo = (datetime.fromisoformat(bloco["fim"]) - timedelta(seconds=1)).date()
+    dias = primeiro.strftime("%d/%m")
+
+    if ultimo != primeiro:
+        dias += f" a {ultimo.strftime('%d/%m')}"
+
+    return f"- {dias} (dia inteiro): {bloco['titulo']}"
+
+
 def formatar_para_prompt(resultado: dict) -> dict[str, str]:
     """Transforma o resultado do executar() em listas de texto para o prompt.
 
     O Gemma entende melhor uma lista legível do que JSON. Nos conflitos,
     troca o id do evento pelo título, para a resposta citar nomes.
+    Eventos de dia inteiro aparecem marcados com "(dia inteiro)".
     """
     ocupados = [
-        f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
+        _formatar_dia_inteiro(b)
+        if b["tipo"] == "dia_inteiro"
+        else f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
         for b in resultado["ocupados"]
     ]
     livres = [
