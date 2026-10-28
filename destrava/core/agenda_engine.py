@@ -1,128 +1,230 @@
-from datetime import datetime, timedelta
+"""
+Motor de cálculo da agenda: ocupados, livres e conflitos.
 
-from destrava.core.models import Block, Conflict, FreeSlot, Visualization
+Fica no core (e não em um agente) porque pode ser reaproveitado por mais de
+um agente (ex.: o de criar pode checar conflitos antes de marcar um evento).
+
+Usa os valores de config.py:
+    FUSO, HORARIO_ACORDAR, HORARIO_DORMIR, DURACAO_MINIMA_LIVRE
+
+Não chama APIs nem LLM: só recebe eventos e devolve cálculos.
+"""
+
+from datetime import date, datetime, time, timedelta
+
+from destrava.core import config
+from destrava.core.models import Bloco, Conflito, HorarioLivre, Visualizacao
 
 
-def merge_blocks(blocks: list[Block]) -> list[Block]:
-    ordered = sorted(blocks, key=lambda block: block.start)
-    merged: list[Block] = []
+def normalizar_fuso(momento: datetime) -> datetime:
+    """Coloca a data no fuso do projeto (config.FUSO).
 
-    for block in ordered:
-        if merged and block.start <= merged[-1].end:
-            merged[-1].end = max(merged[-1].end, block.end)
+    Datas sem fuso são consideradas já no horário de config.FUSO.
+    Datas com fuso (ex.: UTC, vindas do Google) são convertidas para ele.
+    """
+    if momento.tzinfo is None:
+        return momento.replace(tzinfo=config.FUSO)
+    return momento.astimezone(config.FUSO)
+
+
+def _no_dia(dia: date, horario: time) -> datetime:
+    """Junta um dia e um horário em um datetime no fuso do projeto."""
+    return datetime.combine(dia, horario, tzinfo=config.FUSO)
+
+
+def _recortar(bloco: Bloco, inicio: datetime, fim: datetime) -> Bloco | None:
+    """Corta o bloco para caber no período. Devolve None se ficar fora dele."""
+    novo_inicio = max(bloco.inicio, inicio)
+    novo_fim = min(bloco.fim, fim)
+
+    if novo_inicio >= novo_fim:
+        return None
+
+    return bloco.model_copy(update={"inicio": novo_inicio, "fim": novo_fim})
+
+
+def unir_blocos(blocos: list[Bloco]) -> list[Bloco]:
+    """Junta blocos que se sobrepõem ou se encostam em um bloco só.
+
+    Usado para calcular livres e o total ocupado sem contar tempo duas vezes.
+    """
+    ordenados = sorted(blocos, key=lambda bloco: bloco.inicio)
+    unidos: list[Bloco] = []
+
+    for bloco in ordenados:
+        if unidos and bloco.inicio <= unidos[-1].fim:
+            unidos[-1].fim = max(unidos[-1].fim, bloco.fim)
         else:
-            merged.append(block.model_copy())
+            unidos.append(bloco.model_copy())
 
-    return merged
+    return unidos
 
 
-def add_sleep_blocks(
-    start: datetime,
-    end: datetime,
-    sleep_start_hour: int = 23,
-    sleep_end_hour: int = 7,
-) -> list[Block]:
-    sleep_blocks = []
-    current_day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+def gerar_blocos_sono(inicio: datetime, fim: datetime) -> list[Bloco]:
+    """Cria os blocos de sono que caem dentro do período.
 
-    while current_day <= end:
-        sleep_start = current_day.replace(hour=sleep_start_hour)
-        sleep_end = sleep_start + timedelta(days=1)
-        sleep_end = sleep_end.replace(hour=sleep_end_hour)
+    Começa um dia antes do início para incluir a madrugada do primeiro dia
+    (ex.: dormir 22h e acordar 6h gera o bloco da noite anterior até as 6h).
+    Os blocos são cortados para não passar do período pedido.
+    """
+    inicio = normalizar_fuso(inicio)
+    fim = normalizar_fuso(fim)
+    sono_cruza_meia_noite = config.HORARIO_DORMIR > config.HORARIO_ACORDAR
 
-        sleep_blocks.append(
-            Block(
-                id=f"sleep-{sleep_start.isoformat()}",
-                title="Sono",
-                start=sleep_start,
-                end=sleep_end,
-                type="sleep",
+    blocos: list[Bloco] = []
+    dia = inicio.date() - timedelta(days=1)
+
+    while dia <= fim.date():
+        inicio_sono = _no_dia(dia, config.HORARIO_DORMIR)
+
+        if sono_cruza_meia_noite:
+            fim_sono = _no_dia(dia + timedelta(days=1), config.HORARIO_ACORDAR)
+        else:
+            fim_sono = _no_dia(dia, config.HORARIO_ACORDAR)
+
+        bloco = _recortar(
+            Bloco(
+                id=f"sono-{dia.isoformat()}",
+                titulo="Sono",
+                inicio=inicio_sono,
+                fim=fim_sono,
+                tipo="sono",
+            ),
+            inicio,
+            fim,
+        )
+
+        if bloco is not None:
+            blocos.append(bloco)
+
+        dia += timedelta(days=1)
+
+    return blocos
+
+
+def calcular_horarios_livres(
+    ocupados: list[Bloco],
+    inicio: datetime,
+    fim: datetime,
+    duracao_minima: timedelta = config.DURACAO_MINIMA_LIVRE,
+) -> list[HorarioLivre]:
+    """Devolve as lacunas entre os ocupados, dentro do período.
+
+    Só entram lacunas com pelo menos ``duracao_minima``.
+    """
+    inicio = normalizar_fuso(inicio)
+    fim = normalizar_fuso(fim)
+
+    livres: list[HorarioLivre] = []
+    cursor = inicio
+
+    for bloco in unir_blocos(ocupados):
+        if bloco.inicio > cursor and bloco.inicio - cursor >= duracao_minima:
+            livres.append(
+                HorarioLivre(
+                    inicio=cursor,
+                    fim=bloco.inicio,
+                    duracao_minutos=(bloco.inicio - cursor).total_seconds() / 60,
+                )
+            )
+
+        cursor = max(cursor, bloco.fim)
+
+    if fim > cursor and fim - cursor >= duracao_minima:
+        livres.append(
+            HorarioLivre(
+                inicio=cursor,
+                fim=fim,
+                duracao_minutos=(fim - cursor).total_seconds() / 60,
             )
         )
 
-        current_day += timedelta(days=1)
-
-    return sleep_blocks
+    return livres
 
 
-def calculate_free_slots(
-    busy: list[Block],
-    start: datetime,
-    end: datetime,
-    minimum_minutes: int = 15,
-) -> list[FreeSlot]:
-    merged = merge_blocks(busy)
-    free: list[FreeSlot] = []
-    cursor = start
+def encontrar_conflitos(eventos: list[Bloco]) -> list[Conflito]:
+    """Devolve os pares de eventos que se sobrepõem.
 
-    for block in merged:
-        if block.start > cursor:
-            duration = (block.start - cursor).total_seconds() / 60
+    Dois eventos A e B conflitam quando inicio_A < fim_B e inicio_B < fim_A.
+    O sono não entra aqui: um evento durante o sono não é conflito.
+    """
+    conflitos: list[Conflito] = []
 
-            if duration >= minimum_minutes:
-                free.append(
-                    FreeSlot(
-                        start=cursor,
-                        end=block.start,
-                        duration_minutes=duration,
+    for indice, primeiro in enumerate(eventos):
+        for segundo in eventos[indice + 1:]:
+            if primeiro.inicio < segundo.fim and segundo.inicio < primeiro.fim:
+                conflitos.append(
+                    Conflito(
+                        ids_eventos=[primeiro.id, segundo.id],
+                        inicio_sobreposicao=max(primeiro.inicio, segundo.inicio),
+                        fim_sobreposicao=min(primeiro.fim, segundo.fim),
                     )
                 )
 
-        cursor = max(cursor, block.end)
+    return conflitos
 
-    remaining = (end - cursor).total_seconds() / 60
 
-    if remaining >= minimum_minutes:
-        free.append(
-            FreeSlot(
-                start=cursor,
-                end=end,
-                duration_minutes=remaining,
-            )
+def montar_visualizacao(
+    eventos: list[dict],
+    inicio: datetime,
+    fim: datetime,
+) -> Visualizacao:
+    """Calcula ocupados, livres e conflitos de um período.
+
+    Args:
+        eventos: lista de dicionários com as chaves de ``Bloco``
+            (id, titulo, inicio, fim e, opcionalmente, tipo).
+        inicio: começo do período.
+        fim: fim do período.
+
+    Returns:
+        Visualizacao com:
+            - ocupados: cada evento e cada bloco de sono, separados e em ordem
+              (eventos sobrepostos continuam aparecendo cada um com seu título);
+            - livres: lacunas com pelo menos DURACAO_MINIMA_LIVRE;
+            - conflitos: pares de eventos sobrepostos;
+            - totais em minutos (sem contar tempo sobreposto duas vezes).
+
+    Raises:
+        ValueError: se ``fim`` não for posterior a ``inicio``.
+    """
+    inicio = normalizar_fuso(inicio)
+    fim = normalizar_fuso(fim)
+
+    if fim <= inicio:
+        raise ValueError("O fim do período deve ser posterior ao início.")
+
+    blocos_eventos: list[Bloco] = []
+
+    for evento in eventos:
+        bloco = Bloco(**evento)
+        bloco = bloco.model_copy(
+            update={
+                "inicio": normalizar_fuso(bloco.inicio),
+                "fim": normalizar_fuso(bloco.fim),
+            }
         )
+        bloco = _recortar(bloco, inicio, fim)
 
-    return free
+        if bloco is not None:
+            blocos_eventos.append(bloco)
 
+    blocos_sono = gerar_blocos_sono(inicio, fim)
+    ocupados = sorted(blocos_eventos + blocos_sono, key=lambda bloco: bloco.inicio)
 
-def find_conflicts(events: list[Block]) -> list[Conflict]:
-    conflicts: list[Conflict] = []
+    livres = calcular_horarios_livres(ocupados, inicio, fim)
+    conflitos = encontrar_conflitos(blocos_eventos)
 
-    for index, first in enumerate(events):
-        for second in events[index + 1:]:
-            if first.start < second.end and second.start < first.end:
-                conflicts.append(
-                    Conflict(
-                        event_ids=[first.id, second.id],
-                        overlap_start=max(first.start, second.start),
-                        overlap_end=min(first.end, second.end),
-                    )
-                )
-
-    return conflicts
-
-
-def build_visualization(
-    events: list[dict],
-    start: datetime,
-    end: datetime,
-) -> Visualization:
-    event_blocks = [Block(**event) for event in events]
-    sleep_blocks = add_sleep_blocks(start, end)
-
-    busy = merge_blocks(event_blocks + sleep_blocks)
-    free = calculate_free_slots(busy, start, end)
-    conflicts = find_conflicts(event_blocks)
-
-    total_free = sum(slot.duration_minutes for slot in free)
-    total_busy = sum(
-        (block.end - block.start).total_seconds() / 60
-        for block in busy
+    total_livres = sum(livre.duracao_minutos for livre in livres)
+    total_ocupados = sum(
+        (bloco.fim - bloco.inicio).total_seconds() / 60
+        for bloco in unir_blocos(ocupados)
     )
 
-    return Visualization(
-        busy=busy,
-        free=free,
-        conflicts=conflicts,
-        total_free_minutes=total_free,
-        total_busy_minutes=total_busy,
+    return Visualizacao(
+        ocupados=ocupados,
+        livres=livres,
+        conflitos=conflitos,
+        total_minutos_livres=total_livres,
+        total_minutos_ocupados=total_ocupados,
     )

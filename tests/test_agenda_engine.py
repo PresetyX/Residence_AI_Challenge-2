@@ -1,41 +1,41 @@
 from datetime import datetime
 
-from destrava.core.agenda_engine import build_visualization
+from destrava.core.agenda_engine import montar_visualizacao
 
 
-def test_sleep_is_not_free():
-    start = datetime(2026, 10, 28, 0, 0)
-    end = datetime(2026, 10, 29, 0, 0)
+def test_sono_nao_e_livre():
+    inicio = datetime(2026, 10, 28, 0, 0)
+    fim = datetime(2026, 10, 29, 0, 0)
 
-    result = build_visualization([], start, end)
+    resultado = montar_visualizacao([], inicio, fim)
 
     assert all(
-        not (slot.start.hour >= 23 or slot.end.hour <= 7)
-        for slot in result.free
+        not (livre.inicio.hour >= 23 or livre.fim.hour <= 7)
+        for livre in resultado.livres
     )
 
 
-def test_conflict_is_detected():
-    start = datetime(2026, 10, 28, 8, 0)
-    end = datetime(2026, 10, 28, 12, 0)
+def test_conflito_e_detectado():
+    inicio = datetime(2026, 10, 28, 8, 0)
+    fim = datetime(2026, 10, 28, 12, 0)
 
-    events = [
+    eventos = [
         {
             "id": "1",
-            "title": "Aula",
-            "start": datetime(2026, 10, 28, 9, 0),
-            "end": datetime(2026, 10, 28, 10, 0),
-            "type": "event",
+            "titulo": "Aula",
+            "inicio": datetime(2026, 10, 28, 9, 0),
+            "fim": datetime(2026, 10, 28, 10, 0),
+            "tipo": "evento",
         },
         {
             "id": "2",
-            "title": "Reunião",
-            "start": datetime(2026, 10, 28, 9, 30),
-            "end": datetime(2026, 10, 28, 11, 0),
-            "type": "event",
+            "titulo": "Reunião",
+            "inicio": datetime(2026, 10, 28, 9, 30),
+            "fim": datetime(2026, 10, 28, 11, 0),
+            "tipo": "evento",
         },
     ]
 
-    result = build_visualization(events, start, end)
+    resultado = montar_visualizacao(eventos, inicio, fim)
 
-    assert len(result.conflicts) == 1
+    assert len(resultado.conflitos) == 1
