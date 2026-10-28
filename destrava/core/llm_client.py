@@ -3,6 +3,9 @@ Cliente compartilhado de LLM do projeto Destrava.
 
 Envia prompts ao Ollama e retorna o texto gerado.
 
+É o ponto único de entrada dos agentes para o LLM: se config.CLIENTE_LLM for
+"transformers", a chamada é repassada para o cliente alternativo (llm.py).
+
 Interface pública:
     perguntar(prompt: str) -> str
 
@@ -26,6 +29,8 @@ def perguntar(prompt: str) -> str:
     """
     Envia um prompt ao modelo definido em config.py.
 
+    Usa o Ollama ou o cliente alternativo (llm.py), conforme config.CLIENTE_LLM.
+
     Args:
         prompt: Instruções e contexto preparados pelo agente.
 
@@ -42,6 +47,19 @@ def perguntar(prompt: str) -> str:
 
     if not prompt.strip():
         raise ValueError("O prompt não pode estar vazio.")
+
+    cliente = config.CLIENTE_LLM
+
+    if cliente == "transformers":
+        # Import aqui dentro: só carrega o transformers quando for usado.
+        from . import llm
+
+        return llm.perguntar(prompt)
+
+    if cliente != "ollama":
+        raise ErroLLM(
+            'CLIENTE_LLM deve ser "ollama" ou "transformers" em config.py.'
+        )
 
     modelo = config.MODELO
     base_url = config.OLLAMA_URL
