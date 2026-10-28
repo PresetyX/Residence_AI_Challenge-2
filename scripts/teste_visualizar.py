@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
-
+from destrava.agents.visualizar import responder
 
 def formatar(texto_iso: str) -> str:
     """Converte '2026-10-29T09:00:00-03:00' em '29/10 09:00'."""
@@ -50,3 +50,6 @@ for conflito in resultado["conflitos"]:
 
 print(f"\nTotal livre: {resultado['total_minutos_livres']:.0f} min | "
       f"Total ocupado: {resultado['total_minutos_ocupados']:.0f} min")
+
+print("\n=== RESPOSTA DO GEMMA ===")
+print(responder("Como está minha agenda nesse dia?", resultado))

@@ -14,6 +14,8 @@ from datetime import datetime
 from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
 from destrava.core.google_client import get_service, listar_eventos
+from destrava.core.llm_client import perguntar
+from destrava.prompts.visualizar import PROMPT_RESPOSTA
 
 
 def converter_evento_google(evento: dict) -> dict | None:
@@ -82,3 +84,58 @@ class AgenteVisualizar:
         visualizacao = montar_visualizacao(eventos=eventos, inicio=inicio, fim=fim)
 
         return visualizacao.model_dump(mode="json")
+
+def _formatar_horario(texto_iso: str) -> str:
+    """Converte '2026-10-29T09:00:00-03:00' em '29/10 09:00'."""
+    return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
+
+
+def formatar_para_prompt(resultado: dict) -> dict[str, str]:
+    """Transforma o resultado do executar() em listas de texto para o prompt.
+
+    O Gemma entende melhor uma lista legível do que JSON. Nos conflitos,
+    troca o id do evento pelo título, para a resposta citar nomes.
+    """
+    ocupados = [
+        f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
+        for b in resultado["ocupados"]
+    ]
+    livres = [
+        f"- {_formatar_horario(l['inicio'])} a {_formatar_horario(l['fim'])} "
+        f"({l['duracao_minutos']:.0f} min)"
+        for l in resultado["livres"]
+    ]
+
+    titulos = {b["id"]: b["titulo"] for b in resultado["ocupados"]}
+    conflitos = [
+        f"- {' x '.join(titulos.get(i, i) for i in c['ids_eventos'])}: "
+        f"{_formatar_horario(c['inicio_sobreposicao'])} a "
+        f"{_formatar_horario(c['fim_sobreposicao'])}"
+        for c in resultado["conflitos"]
+    ]
+
+    return {
+        "eventos": "\n".join(ocupados) or "- Nenhum",
+        "livres": "\n".join(livres) or "- Nenhum",
+        "conflitos": "\n".join(conflitos) or "- Nenhum",
+    }
+
+
+def responder(pergunta: str, resultado: dict) -> str:
+    """Pede ao LLM uma resposta em português usando só os dados calculados.
+
+    Args:
+        pergunta: o pedido do usuário, em texto.
+        resultado: o dicionário devolvido por AgenteVisualizar.executar().
+
+    Returns:
+        Texto curto em português explicando a agenda.
+
+    Raises:
+        ErroLLM: se o modelo não responder.
+    """
+    prompt = PROMPT_RESPOSTA.format(
+        pergunta_do_usuario=pergunta,
+        **formatar_para_prompt(resultado),
+    )
+    return perguntar(prompt)
