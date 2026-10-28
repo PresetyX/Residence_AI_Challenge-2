@@ -127,13 +127,17 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
 
     O Gemma entende melhor uma lista legível do que JSON. Nos conflitos,
     troca o id do evento pelo título, para a resposta citar nomes.
-    Eventos de dia inteiro aparecem marcados com "(dia inteiro)".
+    Eventos de dia inteiro vão para uma lista separada ("dia_inteiro").
     """
     ocupados = [
-        _formatar_dia_inteiro(b)
-        if b["tipo"] == "dia_inteiro"
-        else f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
+        f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
         for b in resultado["ocupados"]
+        if b["tipo"] != "dia_inteiro"
+    ]
+    dia_inteiro = [
+        _formatar_dia_inteiro(b)
+        for b in resultado["ocupados"]
+        if b["tipo"] == "dia_inteiro"
     ]
     livres = [
         f"- {_formatar_horario(l['inicio'])} a {_formatar_horario(l['fim'])} "
@@ -153,6 +157,8 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
         "eventos": "\n".join(ocupados) or "- Nenhum",
         "livres": "\n".join(livres) or "- Nenhum",
         "conflitos": "\n".join(conflitos) or "- Nenhum",
+        "dia_inteiro": "\n".join(dia_inteiro) or "- Nenhum",
+        "total_livres": f"{resultado['total_minutos_livres']:.0f}",
     }
 
 
