@@ -2,6 +2,7 @@
 
 import json
 import re
+import calendar
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -9,6 +10,35 @@ from destrava.core import config
 from destrava.core.google_client import get_evento, update_evento
 from destrava.core.llm_client import perguntar
 from destrava.prompts.editar import PROMPT_EXTRACAO
+
+
+_DIAS_DA_SEMANA = (
+    "segunda-feira",
+    "terça-feira",
+    "quarta-feira",
+    "quinta-feira",
+    "sexta-feira",
+    "sábado",
+    "domingo",
+)
+_DIAS_DA_SEMANA_ABREVIADOS = {
+    "segunda": 0,
+    "terça": 1,
+    "terca": 1,
+    "quarta": 2,
+    "quinta": 3,
+    "sexta": 4,
+    "sábado": 5,
+    "sabado": 5,
+    "domingo": 6,
+}
+_PADRAO_SEMANA_SEGUINTE = (
+    r"\b(?:semana\s+(?:que\s+vem|seguinte)|próxima\s+semana)\b"
+)
+
+
+def _indica_semana_seguinte(pedido: str) -> bool:
+    return re.search(_PADRAO_SEMANA_SEGUINTE, pedido) is not None
 
 
 def _corrigir_periodo_do_dia(
@@ -41,6 +71,85 @@ def _corrigir_periodo_do_dia(
                 **valor,
                 "dateTime": horario.replace(hour=horario.hour + 12).isoformat(),
             }
+    return resultado
+
+
+def _normalizar_alteracao_de_data(
+    alteracoes: dict[str, Any],
+) -> dict[str, Any]:
+    """Converte o campo legado ``date`` para o campo Calendar ``start``."""
+    if "date" not in alteracoes:
+        return alteracoes
+
+    valor_data = alteracoes.get("date")
+    if isinstance(valor_data, str):
+        chave_data = "dateTime" if "T" in valor_data else "date"
+        valor_data = {chave_data: valor_data}
+    elif isinstance(valor_data, dict):
+        if "dateTime" not in valor_data and "date" not in valor_data:
+            raise ValueError("A alteração de data deve conter dateTime ou date.")
+    else:
+        raise ValueError("A alteração de data deve ser uma data válida.")
+
+    resultado = {chave: valor for chave, valor in alteracoes.items() if chave != "date"}
+    resultado.setdefault("start", valor_data)
+    return resultado
+
+
+def _filtrar_campos_solicitados(
+    alteracoes: dict[str, Any],
+    pedido: str,
+) -> dict[str, Any]:
+    """Descarta campos que o modelo incluiu sem serem pedidos."""
+    pedido_lower = pedido.lower()
+    termos_temporais = (
+        "data",
+        "dia",
+        "horário",
+        "hora",
+        "minuto",
+        "segundo",
+        "amanhã",
+        "ontem",
+        "hoje",
+        "segunda",
+        "terça",
+        "quarta",
+        "quinta",
+        "sexta",
+        "sábado",
+        "domingo",
+        "duração",
+        "mês",
+        "mes",
+        "semana",
+        "ano",
+    )
+    menciona_hora = re.search(r"\b\d{1,2}(?:h|:\d{2})\b", pedido_lower)
+    menciona_tempo = menciona_hora or any(
+        termo in pedido_lower for termo in termos_temporais
+    )
+    campos_temporais = {"date", "start", "end"}
+    campos_por_termo = {
+        "summary": ("título", "titulo", "nome"),
+        "description": ("descrição", "descricao"),
+        "location": ("local", "endereço", "endereco"),
+    }
+    resultado: dict[str, Any] = {}
+    for campo, valor in alteracoes.items():
+        if campo in campos_temporais and menciona_tempo:
+            resultado[campo] = valor
+        elif campo in campos_por_termo and any(
+            termo in pedido_lower for termo in campos_por_termo[campo]
+        ):
+            resultado[campo] = valor
+    if not resultado:
+        if menciona_tempo:
+            # O modelo pode não emitir start/end para um pedido que só informa
+            # um dia da semana. O ajuste posterior preenche as duas pontas
+            # usando o evento atual e preserva seus horários.
+            return {"start": {}, "end": {}}
+        raise ValueError("Não foi possível identificar uma alteração solicitada.")
     return resultado
 
 
@@ -79,36 +188,123 @@ def _ajustar_data_de_horario(
 
     hoje = datetime.now(config.FUSO).date()
     data_forcada = None
-    mover_evento_inteiro = False
+    dia_explicito = re.search(r"\bdia\s+(\d{1,2})\b", pedido_lower)
+    if dia_explicito:
+        try:
+            data_forcada = hoje.replace(day=int(dia_explicito.group(1)))
+        except ValueError as erro:
+            raise ValueError(
+                f"O dia {dia_explicito.group(1)} não existe no mês atual."
+            ) from erro
+
+    if re.search(r"\bm[eê]s\s+que\s+vem\b", pedido_lower):
+        ultimo_dia = calendar.monthrange(hoje.year, hoje.month + 1)[1] if hoje.month < 12 else 31
+        if hoje.month == 12:
+            data_forcada = hoje.replace(
+                year=hoje.year + 1,
+                month=1,
+                day=min(hoje.day, ultimo_dia),
+            )
+        else:
+            data_forcada = hoje.replace(
+                month=hoje.month + 1,
+                day=min(hoje.day, ultimo_dia),
+            )
+    elif _indica_semana_seguinte(pedido_lower):
+        data_forcada = hoje + timedelta(days=7)
+
+    dia_da_semana = re.search(
+        r"\b(?:próxim[oa]\s+|na\s+|no\s+|em\s+)?"
+        r"(segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)"
+        r"(?:-feira)?(?:\s+que\s+vem)?\b",
+        pedido_lower,
+    )
+    if dia_da_semana:
+        dia_alvo = _DIAS_DA_SEMANA_ABREVIADOS[dia_da_semana.group(1)]
+        diferenca_dias = dia_alvo - hoje.weekday()
+        proxima_semana = bool(
+            re.search(
+                r"\b(?:próxim[oa]|que\s+vem|seguinte)\s+"
+                r"(?:segunda|terça|terca|quarta|quinta|sexta|sábado|"
+                r"sabado|domingo)",
+                pedido_lower,
+            )
+            or re.search(
+                r"\b(?:segunda|terça|terca|quarta|quinta|sexta|sábado|"
+                r"sabado|domingo)(?:-feira)?\s+que\s+vem\b",
+                pedido_lower,
+            )
+        )
+        if proxima_semana:
+            dias_ate_alvo = diferenca_dias % 7 or 7
+        elif -2 <= diferenca_dias < 0:
+            dias_ate_alvo = diferenca_dias
+        else:
+            dias_ate_alvo = diferenca_dias % 7
+        data_forcada = hoje + timedelta(days=dias_ate_alvo)
+
+    altera_ponta_especifica = re.search(
+        r"\b(?:in[ií]cio|come[cç]o|fim|final|t[eé]rmino)\b",
+        pedido_lower,
+    )
+    mover_evento_inteiro = not altera_ponta_especifica
     if re.search(r"\bdepois\s+de\s+amanh[ãa]\b", pedido_lower):
         data_forcada = hoje + timedelta(days=2)
-        mover_evento_inteiro = "data do evento" in pedido_lower
+    elif re.search(r"\b(?:antes\s+de\s+ontem|anteontem)\b", pedido_lower):
+        data_forcada = hoje - timedelta(days=2)
+    elif re.search(r"\bontem\b", pedido_lower):
+        data_forcada = hoje - timedelta(days=1)
     elif re.search(r"\bamanh[ãa]\b", pedido_lower):
         data_forcada = hoje + timedelta(days=1)
-        mover_evento_inteiro = "data do evento" in pedido_lower
     elif re.search(r"\bhoje\b", pedido_lower):
         data_forcada = hoje
-        mover_evento_inteiro = "data do evento" in pedido_lower
+
+    if _indica_semana_seguinte(pedido_lower):
+        inicio_atual = evento_atual.get("start")
+        if isinstance(inicio_atual, dict):
+            valor_inicio = inicio_atual.get("dateTime") or inicio_atual.get("date")
+            if isinstance(valor_inicio, str):
+                try:
+                    data_forcada = (
+                        datetime.fromisoformat(valor_inicio).date()
+                        + timedelta(days=7)
+                    )
+                except ValueError:
+                    pass
 
     resultado = dict(alteracoes)
     if mover_evento_inteiro:
+        if data_forcada is None:
+            return resultado
         for campo in ("start", "end"):
             valor_atual = evento_atual.get(campo)
             if not isinstance(valor_atual, dict):
                 continue
             data_hora_atual = valor_atual.get("dateTime")
-            if not isinstance(data_hora_atual, str):
-                continue
-            try:
-                data_hora_atual_dt = datetime.fromisoformat(data_hora_atual)
-            except ValueError:
-                continue
             novo_valor = dict(resultado.get(campo, valor_atual))
-            novo_valor["dateTime"] = data_hora_atual_dt.replace(
-                year=data_forcada.year,
-                month=data_forcada.month,
-                day=data_forcada.day,
-            ).isoformat()
+            if isinstance(data_hora_atual, str):
+                try:
+                    data_hora_atual_dt = datetime.fromisoformat(data_hora_atual)
+                except ValueError:
+                    continue
+                novo_valor["dateTime"] = data_hora_atual_dt.replace(
+                    year=data_forcada.year,
+                    month=data_forcada.month,
+                    day=data_forcada.day,
+                ).isoformat()
+            else:
+                data_atual = valor_atual.get("date")
+                if not isinstance(data_atual, str):
+                    continue
+                try:
+                    data_atual_dt = datetime.fromisoformat(data_atual)
+                except ValueError:
+                    continue
+                novo_valor["date"] = data_atual_dt.replace(
+                    year=data_forcada.year,
+                    month=data_forcada.month,
+                    day=data_forcada.day,
+                ).date().isoformat()
             resultado[campo] = novo_valor
         return resultado
 
@@ -149,8 +345,10 @@ def interpretar_pedido(pedido: str) -> dict[str, Any]:
     if not isinstance(pedido, str) or not pedido.strip():
         raise ValueError("pedido deve ser uma string não vazia.")
 
+    hoje = datetime.now(config.FUSO).date()
     prompt = PROMPT_EXTRACAO.format(
-        data_de_hoje=datetime.now(config.FUSO).date().isoformat(),
+        data_de_hoje=hoje.isoformat(),
+        dia_da_semana_hoje=_DIAS_DA_SEMANA[hoje.weekday()],
         fuso=str(config.FUSO),
         pergunta_do_usuario=pedido.strip(),
     )
@@ -178,7 +376,10 @@ def interpretar_pedido(pedido: str) -> dict[str, Any]:
 
     return {
         "evento_id": evento_id.strip(),
-        "alteracoes": _corrigir_periodo_do_dia(alteracoes, pedido),
+        "alteracoes": _filtrar_campos_solicitados(
+            _corrigir_periodo_do_dia(alteracoes, pedido),
+            pedido,
+        ),
     }
 
 
@@ -228,6 +429,7 @@ def _editar_evento(
             "o Calendar API não salva alterações no título, descrição "
             "ou anexos desse item."
         )
+    alteracoes = _normalizar_alteracao_de_data(alteracoes)
     if pedido is not None:
         alteracoes = _ajustar_data_de_horario(
             alteracoes,
