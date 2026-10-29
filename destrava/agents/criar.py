@@ -63,3 +63,51 @@ def validar_dados_evento(dados: dict) -> dict:
         "inicio": data_inicio.isoformat(),
         "fim": data_fim.isoformat()
     }
+
+
+def criar_evento_google(dados: dict, servico) -> dict:
+    """
+    Cria um evento no Google Calendar com dados validados.
+
+    Chamada após a autorização do fluxo de criação.
+
+    Args:
+        dados (dict): Dicionário com título, início e fim.
+        servico: Serviço autenticado do Google Calendar.
+
+    Returns:
+        dict: Evento criado, retornado pela API do Google.
+
+    Raises:
+        ValueError: Se os dados do evento forem inválidos.
+        RuntimeError: Se a API não retornar o ID do evento.
+        HttpError: Se a API do Google retornar um erro.
+
+    Escopo OAuth:
+        calendar
+    """
+    evento = validar_dados_evento(dados)
+
+    corpo = {
+        "summary": evento["titulo"],
+        "start": {
+            "dateTime": evento["inicio"],
+            "timeZone": str(config.FUSO)
+        },
+        "end": {
+            "dateTime": evento["fim"],
+            "timeZone": str(config.FUSO)
+        }
+    }
+
+    resultado = servico.events().insert(
+        calendarId="primary",
+        body=corpo
+    ).execute()
+
+    if not resultado.get("id"):
+        raise RuntimeError(
+            "A API não retornou o ID do evento."
+        )
+
+    return resultado
