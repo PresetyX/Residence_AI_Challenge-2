@@ -14,9 +14,10 @@
 #       exemplos funcionam melhor do que explicações longas.
 #
 #   PROMPT_RESPOSTA  (passo 2: o LLM escreve a resposta final)
-#     - Entrada: dados JÁ calculados/obtidos pelo código (eventos, horários livres e conflitos).
+#     - Entrada: dados JÁ calculados/obtidos pelo código, só com as seções que o
+#       usuário pediu (o código faz essa escolha antes de montar o prompt).
 #     - Saída esperada: texto curto em português (resumo da agenda do período pedido).
-#     - Lacunas: {eventos}, {livres}, {conflitos}, {dia_inteiro}, {total_livres}, {pergunta_do_usuario}
+#     - Lacunas: {pergunta_do_usuario}, {contexto}
 #     - Deve mandar usar SOMENTE os dados informados e não inventar nada.
 #
 # REGRAS DO GRUPO
@@ -86,83 +87,18 @@ Resposta:"""
 
 
 # PROMPT_RESPOSTA: dados calculados -> texto final em português
+# O código (agents/visualizar.py, função responder) já escolhe quais seções
+# entram em {contexto}, conforme o que o usuário pediu (livres, ocupados ou
+# conflitos). Assim o modelo não tem como mostrar o que não foi pedido.
 PROMPT_RESPOSTA = """Você é o Agente de Visualização do Destrava.
 
-Explique a rotina do usuário usando SOMENTE os dados abaixo.
-
-Regras:
-- Nunca invente horários, eventos ou conflitos.
-- O sono é um horário ocupado.
-- Use os nomes dos eventos na resposta.
-- Use o total de minutos livres informado.
-- Use a classificação da agenda informada abaixo, sem recalcular.
-- SEMPRE inclua uma seção "Horários ocupados:" com TODOS os eventos ocupados informados, incluindo o sono.
-- Se houver evento de dia inteiro, inclua uma seção "Evento de dia inteiro:".
-- Responda em português brasileiro.
-- Seja curto, claro e empático.
-- Não adicione informações que não estejam nos dados.
-- NÃO copie o exemplo literal: use-o apenas como guia de estrutura.
-- Este agente é SOMENTE de visualização (leitura). Ele não pode criar, editar ou excluir eventos.
-- Se o usuário pedir para criar, editar, excluir ou modificar qualquer evento, responda que você não tem permissão para isso e oriente-o a consultar o Agente de Exclusão (ou o agente responsável pela ação).
-- Não tente executar a ação nem invente que ela foi feita.
-- Inclua na resposta APENAS as seções relevantes ao pedido do usuário.
-- Se o usuário pediu apenas horários livres, mostre SOMENTE a seção "Horários livres:" (e o total, se fizer sentido).
-- Se o usuário perguntou apenas sobre conflitos, mostre SOMENTE a seção de conflitos.
-- Se o usuário perguntou apenas sobre horários ocupados, mostre SOMENTE a seção "Horários ocupados:".
-- Se o pedido for geral (ex.: "como está minha agenda?"), inclua todas as seções relevantes.
-- Não inclua seções que o usuário não pediu.
-
+Responda ao pedido do usuário usando SOMENTE os dados abaixo.
+Inclua apenas as seções presentes nos dados — não invente seções que não foram informadas.
 
 Pedido do usuário:
 {pergunta_do_usuario}
 
-Classificação da agenda:
-{classificacao}
+Dados disponíveis:
+{contexto}
 
-Horários ocupados (compromissos e sono):
-{eventos}
-
-Horários livres:
-{livres}
-
-Total de minutos livres:
-{total_livres}
-
-Conflitos:
-{conflitos}
-
-Eventos de dia inteiro:
-{dia_inteiro}
-
-Siga EXATAMENTE esta estrutura, preenchendo com os dados reais:
-
-Avaliei o período de [DATA_INICIO] até [DATA_FIM].
-
-Sua agenda está [classificacao], com [total_livres] minutos livres.
-
-Horários livres:
-- [horário início] até [horário fim]
-
-Horários ocupados:
-- [nome do evento]: [horário início] até [horário fim]
-
-Evento de dia inteiro:
-- [nome do evento] ([data])
-
-Você possui compromissos conflitantes:
-- [Evento A] x [Evento B]: [horário início] até [horário fim]
-
-Exemplos:
-
-Pedido: "Quais horários livres eu tenho amanhã?"
-Resposta:
-Horários livres:
-- 06:00 até 11:00 (300 min)
-- 19:00 até 20:00 (60 min)
-
-Pedido: "Tenho algum conflito amanhã?"
-Resposta:
-Você possui compromissos conflitantes:
-- Evento A x Evento B: 11:00 até 12:00
-
-Agora escreva a resposta usando os dados reais informados acima."""
+Responda em português brasileiro, de forma curta e clara. Não invente nada."""

@@ -21,6 +21,7 @@ from . import config
 __all__ = ["perguntar", "ErroLLM"]
 
 
+# Erro próprio do projeto: os agentes tratam só este, seja qual for a falha.
 class ErroLLM(RuntimeError):
     """Erro de configuração, comunicação ou resposta do Ollama."""
 
@@ -42,12 +43,14 @@ def perguntar(prompt: str) -> str:
         ValueError: Se o prompt estiver vazio.
         ErroLLM: Se a configuração for inválida ou a chamada falhar.
     """
+    # 1. Valida o prompt recebido do agente.
     if not isinstance(prompt, str):
         raise TypeError("O prompt deve ser uma string.")
 
     if not prompt.strip():
         raise ValueError("O prompt não pode estar vazio.")
 
+    # 2. Escolhe o cliente de LLM definido no config.py.
     cliente = config.CLIENTE_LLM
 
     if cliente == "transformers":
@@ -61,6 +64,7 @@ def perguntar(prompt: str) -> str:
             'CLIENTE_LLM deve ser "ollama" ou "transformers" em config.py.'
         )
 
+    # 3. Lê e valida as configurações do Ollama.
     modelo = config.MODELO
     base_url = config.OLLAMA_URL
     timeout = config.TIMEOUT_LLM
@@ -84,7 +88,11 @@ def perguntar(prompt: str) -> str:
             "TIMEOUT_LLM deve ser um número positivo em config.py."
         )
 
+    # 4. Monta o endereço: "http://localhost:11434" + "/api/generate".
     url = f"{base_url.strip().rstrip('/')}/api/generate"
+
+    # 5. Monta o pedido: qual modelo, qual texto e receber a resposta inteira
+    #    de uma vez (stream False), em vez de palavra por palavra.
 
     payload = {
         "model": modelo.strip(),
@@ -92,6 +100,8 @@ def perguntar(prompt: str) -> str:
         "stream": False,
     }
 
+    # 6. Envia ao Ollama. timeout=(5, timeout): 5 s para conectar e
+    #    TIMEOUT_LLM segundos para o modelo responder.
     try:
         resposta = requests.post(
             url,
@@ -114,6 +124,8 @@ def perguntar(prompt: str) -> str:
             f"Falha ao enviar a requisição ao Ollama: {exc}"
         ) from exc
 
+    # 7. Confere o código de status (200 = deu certo; 404, 500... = erro)
+    #    e transforma o erro em uma mensagem clara.
     try:
         resposta.raise_for_status()
     except requests.exceptions.HTTPError as exc:
@@ -145,6 +157,7 @@ def perguntar(prompt: str) -> str:
 
         raise ErroLLM(mensagem) from exc
 
+    # 8. Converte a resposta (JSON) em dicionário Python.
     try:
         dados = resposta.json()
     except ValueError as exc:
@@ -163,6 +176,7 @@ def perguntar(prompt: str) -> str:
             f"O Ollama informou um erro: {dados['error']}"
         )
 
+    # 9. Pega só o texto gerado (campo "response") e o devolve ao agente.
     texto = dados.get("response")
 
     if not isinstance(texto, str) or not texto.strip():
