@@ -1,8 +1,26 @@
 """Teste manual do AgenteVisualizar com a agenda real (Passo 1).
 
-Uso:
-    python teste_visualizar.py              -> testa o dia de amanhã
-    python teste_visualizar.py 2026-10-29   -> testa um dia específico
+Consulta um dia inteiro do Google Agenda e imprime, em sequência:
+    1. Os horários ocupados (eventos e dias inteiros).
+    2. Os horários livres, com a duração de cada um.
+    3. Os conflitos entre eventos (ou "Nenhum").
+    4. Os totais de minutos livres e ocupados.
+    5. A resposta escrita pelo Gemma para "Como está minha agenda nesse dia?".
+
+Diferença em relação ao cli.py: aqui o período é definido pelo próprio
+script (o dia escolhido, de 00:00 a 00:00 do dia seguinte), sem pedir ao
+LLM que interprete a pergunta. Assim dá para conferir o cálculo e a
+resposta separadamente da etapa de interpretação.
+
+Uso (na raiz do projeto, com -m para o Python encontrar o pacote destrava):
+    python -m scripts.teste_visualizar              -> testa o dia de amanhã
+    python -m scripts.teste_visualizar 2026-10-29   -> testa um dia específico
+
+Requisitos:
+    - credentials.json na raiz do projeto (na primeira vez, o navegador abre
+      para autorizar a leitura da agenda).
+    - Ollama rodando com o modelo definido em config.MODELO (só para a
+      etapa 5; as etapas 1 a 4 funcionam sem o LLM).
 """
 
 import sys
@@ -13,7 +31,20 @@ from destrava.core import config
 from destrava.agents.visualizar import responder
 
 def formatar(texto_iso: str) -> str:
-    """Converte '2026-10-29T09:00:00-03:00' em '29/10 09:00'."""
+    """Converte uma data e hora em ISO 8601 para o formato curto dia/mês hora.
+
+    Exemplo: '2026-10-29T09:00:00-03:00' vira '29/10 09:00'.
+
+    Args:
+        texto_iso: data e hora em texto no formato ISO 8601, como as que o
+            AgenteVisualizar devolve.
+
+    Returns:
+        Texto no formato "DD/MM HH:MM".
+
+    Raises:
+        ValueError: se o texto não estiver em formato ISO 8601 válido.
+    """
     return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
 
 

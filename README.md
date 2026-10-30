@@ -1,6 +1,11 @@
-# Residence_AI_Challenge-2
+# Destrava (Residence_AI_Challenge-2)
 
-No momento, agentes que fazem o CRUD do Google Agenda (visualizar, criar, editar e excluir), usando o modelo Gemma 2 rodando localmente com o Ollama.
+Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando localmente com o Ollama.
+
+| Agente | Situação |
+|---|---|
+| Visualização | Pronto: mostra compromissos, horários livres e conflitos (somente leitura) |
+| Criar, editar, excluir | Em desenvolvimento |
 
 ## Pré-requisitos
 
@@ -38,18 +43,74 @@ No momento, agentes que fazem o CRUD do Google Agenda (visualizar, criar, editar
 3. Crie uma credencial **OAuth Client ID** do tipo **Desktop app** e baixe o arquivo JSON.
 4. Salve o arquivo como `credentials.json` na **raiz do projeto** (ao lado deste README).
 
-Na primeira execução, o navegador abre para você autorizar o acesso e um arquivo `token*.json` é gerado.
-
 > `credentials.json` e `token*.json` estão no `.gitignore`. **Nunca** faça commit deles.
+
+## Como rodar o agente de visualização
+
+Todos os comandos são executados **na raiz do projeto**, com o ambiente virtual ativo.
+
+### 1. Confirme que o Ollama está rodando
+
+```
+ollama list
+```
+
+O modelo `gemma2:2b` deve aparecer na lista. Se o comando falhar, inicie o servidor com `ollama serve` (em outro terminal) e tente de novo.
+
+### 2. Inicie o chat
+
+```
+python cli.py
+```
+
+Digite uma pergunta sobre a agenda e pressione Enter. Para encerrar, digite `sair`.
+
+**Na primeira execução**, o navegador abre para você autorizar o acesso de **leitura** ao Google Agenda. Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, o arquivo `token_readonly.json` é criado e o login não é pedido de novo.
+
+### 3. Exemplos de perguntas
+
+```
+Quais são meus horários livres hoje?
+Quais são meus compromissos amanhã?
+Tenho conflito de horário esta semana?
+Como está minha agenda na sexta?
+```
+
+O agente interpreta o período, busca os eventos, calcula e responde só com o que foi pedido. Pedidos de ação (criar, editar, excluir) são recusados, porque o agente é somente de leitura.
+
+## Teste rápido sem o chat
+
+Mostra, para um dia, os horários ocupados, livres e conflitos calculados, e depois a resposta do Gemma:
+
+```
+python -m scripts.teste_visualizar              # dia de amanhã
+python -m scripts.teste_visualizar 2026-10-29   # um dia específico (AAAA-MM-DD)
+```
+
+Use `python -m` (e não `python scripts/teste_visualizar.py`), senão aparece `ModuleNotFoundError: destrava`.
+
+## Problemas comuns
+
+| Mensagem ou sintoma | O que fazer |
+|---|---|
+| Erro de conexão com o modelo, ou demora muito | Confira se o Ollama está rodando (`ollama list`) e se o modelo foi baixado (`ollama pull gemma2:2b`). |
+| `ModuleNotFoundError: destrava` | Rode a partir da raiz do projeto e use `python -m scripts.teste_visualizar`. |
+| `credentials.json` não encontrado | Siga a seção "Credenciais do Google" e salve o arquivo na raiz do projeto. |
+| `SSL: CERTIFICATE_VERIFY_FAILED` ao falar com o Google | A rede pode estar interceptando a conexão (ex.: Wi-Fi com login). Tente outra rede. Não desative a verificação de certificado. |
+| Erro de fuso horário no Windows (`ZoneInfo`) | Instale o pacote de fusos: `pip install tzdata` (já está no `requirements.txt`). |
+| Resposta com período errado | O modelo pequeno pode errar. Reformule com datas mais claras (ex.: "amanhã", "esta semana"). |
+| Autorização do Google travada ou com conta errada | Apague o arquivo `token_readonly.json` e rode de novo para autorizar novamente. |
 
 ## Estrutura
 
 ```
 destrava/
-├── core/      configurações e conexões compartilhadas (config, google_client, llm_client)
+├── core/      configurações e conexões compartilhadas (config, google_client, llm_client, agenda_engine)
 ├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
 └── prompts/   prompts de cada agente
 docs/          documentação técnica de cada agente
+scripts/       scripts de teste manual
+cli.py         chat de linha de comando
 ```
 
 ## Configuração
