@@ -232,14 +232,6 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
         for l in resultado["livres"]
     ]
 
-    # Classifica a agenda pelo total de minutos livres no período.
-    def classificar_agenda(total_livres: int) -> str:
-        if total_livres <= 60:
-            return "cheia"
-        if total_livres <= 240:
-            return "média"
-        return "curta"
-
     # Nos conflitos, troca o id do evento pelo título, para a resposta citar nomes.
     titulos = {b["id"]: b["titulo"] for b in resultado["ocupados"]}
     conflitos = [
@@ -259,7 +251,6 @@ def formatar_para_prompt(resultado: dict) -> dict[str, str]:
         "conflitos": "\n".join(conflitos) or "- Nenhum",
         "dia_inteiro": "\n".join(dia_inteiro) or "- Nenhum",
         "total_livres": f"{total_livres:.0f}",
-        "classificacao": classificar_agenda(total_livres),
     }
 
 
@@ -320,7 +311,6 @@ def responder(pergunta: str, resultado: dict) -> str:
     if quer_livres:
         secoes.append(f"Horários livres:\n{dados['livres']}")
         secoes.append(f"Total de minutos livres:\n{dados['total_livres']}")
-        secoes.append(f"Classificação da agenda:\n{dados['classificacao']}")
     if quer_conflitos:
         secoes.append(f"Conflitos:\n{dados['conflitos']}")
 
