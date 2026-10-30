@@ -182,7 +182,7 @@ class AgenteVisualizar:
         if _pede_acao(pergunta):
             return (
                 "Não tenho permissão para criar, editar ou excluir eventos. "
-                "Por favor, consulte o Agente de Exclusão para realizar essa ação."
+                "Por favor, consulte o Supervisor para realizar essa ação."
             )
 
         # 2. LLM transforma a pergunta em período ("amanhã" -> datas).
@@ -279,7 +279,6 @@ def _pede_conflitos(pergunta: str) -> bool:
 
 def _pede_ocupados(pergunta: str) -> bool:
     texto = pergunta.lower()
-    # "agenda" não entra: aparece em quase toda pergunta e ativaria esta seção sempre.
     return any(p in texto for p in ("ocupado", "ocupados", "compromisso", "compromissos", "evento", "eventos"))
 
 
