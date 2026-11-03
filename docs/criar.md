@@ -15,8 +15,8 @@ O que entra e o que sai, para o supervisor saber como chamá-lo.
 | | |
 |---|---|
 | **Entrada** | texto: o pedido do usuário (ex.: "marque dentista amanhã às 15h") |
-| **Saída** | texto em português confirmando o resultado |
-| **Função de entrada** | `criar_evento_agenda(pedido: str) -> str` *(nome sugerido; confirmar com o grupo)* |
+| **Saída** | JSON padrão (ver [contrato.md](contrato.md)): `acao: "evento_criado"`, `periodo` lido da resposta do Google e `dados.periodo_confere` |
+| **Função de entrada** | `AgenteCriar().executar_por_texto(pedido, confirmar=None) -> RespostaAgente` (`.para_json()` / `.para_dict()`) |
 
 ## Fluxo
 
@@ -25,7 +25,7 @@ Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
 | # | Passo | Quem |
 |---|---|---|
 | 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
-| 2 | Cria o evento no Google Agenda com os dados extraídos | Código |
+| 2 | Cria o evento no Google Agenda e confere se o período retornado é o pedido (`conferir_periodo`) | Código |
 | 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
 
 *Ajuste os passos se o seu agente tiver mais etapas.*
