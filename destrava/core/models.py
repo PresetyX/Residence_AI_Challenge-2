@@ -5,10 +5,10 @@ Usadas pelo agenda_engine.py (que calcula) e pelos agentes (que exibem).
 Todas as datas são datetime com fuso horário (config.FUSO).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class Bloco(BaseModel):
@@ -45,3 +45,18 @@ class Visualizacao(BaseModel):
     conflitos: list[Conflito]
     total_minutos_livres: float
     total_minutos_ocupados: float
+
+
+class PedidoVisualizacao(BaseModel):
+    """Pedido de entrada do agente de visualização: o período a consultar."""
+
+    inicio: datetime
+    fim: datetime
+
+    @model_validator(mode="after")
+    def _fim_depois_inicio(self):
+        if self.fim < self.inicio:
+            raise ValueError("A data final não deve ser anterior a atual")
+        if self.fim == self.inicio:
+            self.fim = self.inicio + timedelta(days=1)
+        return self

@@ -1,16 +1,15 @@
-"""Teste manual do AgenteVisualizar com a agenda real (Passo 1).
+"""Teste manual do AgenteVisualizar com a agenda real.
 
 Consulta um dia inteiro do Google Agenda e imprime, em sequência:
     1. Os horários ocupados (eventos e dias inteiros).
     2. Os horários livres, com a duração de cada um.
     3. Os conflitos entre eventos (ou "Nenhum").
     4. Os totais de minutos livres e ocupados.
-    5. A resposta escrita pelo Gemma para "Como está minha agenda nesse dia?".
 
 Diferença em relação ao cli.py: aqui o período é definido pelo próprio
-script (o dia escolhido, de 00:00 a 00:00 do dia seguinte), sem pedir ao
-LLM que interprete a pergunta. Assim dá para conferir o cálculo e a
-resposta separadamente da etapa de interpretação.
+script (o dia escolhido, de 00:00 a 00:00 do dia seguinte) e o resultado
+completo de executar() é mostrado, incluindo ocupados e conflitos. O cli.py
+testa o contrato JSON (executar_json), que devolve só os horários livres.
 
 Uso (na raiz do projeto, com -m para o Python encontrar o pacote destrava):
     python -m scripts.teste_visualizar              -> testa o dia de amanhã
@@ -19,16 +18,16 @@ Uso (na raiz do projeto, com -m para o Python encontrar o pacote destrava):
 Requisitos:
     - credentials.json na raiz do projeto (na primeira vez, o navegador abre
       para autorizar a leitura da agenda).
-    - Ollama rodando com o modelo definido em config.MODELO (só para a
-      etapa 5; as etapas 1 a 4 funcionam sem o LLM).
 """
 
 import sys
+import json
+
 from datetime import date, datetime, timedelta
 
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
-from destrava.agents.visualizar import responder
+
 
 def formatar(texto_iso: str) -> str:
     """Converte uma data e hora em ISO 8601 para o formato curto dia/mês hora.
@@ -82,5 +81,6 @@ for conflito in resultado["conflitos"]:
 print(f"\nTotal livre: {resultado['total_minutos_livres']:.0f} min | "
       f"Total ocupado: {resultado['total_minutos_ocupados']:.0f} min")
 
-print("\n=== RESPOSTA DO GEMMA ===")
-print(responder("Como está minha agenda nesse dia?", resultado))
+print("\n=== JSON DO CONTRATO (executar_json) ===")
+pedido = {"inicio": inicio.isoformat(), "fim": fim.isoformat()}
+print(json.dumps(AgenteVisualizar().executar_json(pedido), ensure_ascii=False, indent=2))

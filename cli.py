@@ -1,31 +1,37 @@
 """CLI do Destrava: agente de visualização da agenda.
 
-Contrato: recebe qualquer pergunta em texto livre sobre a agenda,
-extrai o período com o LLM, busca os eventos no Google Calendar,
-calcula ocupados/livres/conflitos e devolve uma explicação em português.
+Contrato: recebe um JSON com o período ("inicio" e "fim", ISO 8601) e
+devolve um JSON com os horários livres e o total de minutos livres.
+Se "fim" for igual a "inicio", o período vira o dia inteiro.
+
+Uso (na raiz do projeto):
+    python cli.py
+    JSON: {"inicio": "2026-11-04T00:00:00-03:00", "fim": "2026-11-05T00:00:00-03:00"}
 """
+
+import json
 
 from destrava.agents.visualizar import AgenteVisualizar
 
 
 def main():
-    print("Digite sua pergunta sobre a agenda (ou 'sair').\n")
-
     agente = AgenteVisualizar()
 
-    while True:
-        pergunta = input("Você: ").strip()
+    print('Cole um JSON {"inicio": "...", "fim": "..."} (ou "sair").\n')
 
-        if pergunta.lower() in ("sair", "exit", "quit"):
+    while True:
+        entrada = input("JSON: ").strip()
+
+        if entrada.lower() in ("sair", "exit", "quit"):
             break
-        if not pergunta:
+        if not entrada:
             continue
 
         try:
-            resposta = agente.executar_por_texto(pergunta)
-            print(f"\n{resposta}\n")
+            resposta = agente.executar_json(entrada)
+            print(json.dumps(resposta, ensure_ascii=False, indent=2))
         except Exception as erro:
-            print(f"\n[erro] {erro}\n")
+            print(f"[erro] {erro}")
 
 
 if __name__ == "__main__":

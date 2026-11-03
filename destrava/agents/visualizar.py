@@ -12,10 +12,13 @@ um texto em português com o resumo (PROMPT_RESPOSTA).
 import json
 from datetime import date, datetime, time, timedelta
 
+from pydantic import ValidationError
+
 from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
 from destrava.core.google_client import get_service, listar_eventos
 from destrava.core.llm_client import perguntar
+from destrava.core.models import PedidoVisualizacao
 from destrava.prompts.visualizar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
@@ -120,6 +123,31 @@ def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
 
 class AgenteVisualizar:
     """Agente de visualização: ocupados, livres e conflitos de um período."""
+
+    def executar_json(self, entrada: dict | str) -> dict:
+        """Recebe o período em JSON e devolve os horários livres.
+
+    Args:
+        entrada: dict ou string JSON com "inicio" e "fim" (ISO 8601).
+            Se "fim" for igual a "inicio", o período vira um dia inteiro.
+
+    Returns:
+        {"livres": [...], "total_minutos_livres": ...} se o pedido for válido,
+        ou {"erro": "Pedido inválido", "detalhes": [...]} se não for.
+    """
+        try:
+            if isinstance(entrada, str):
+                pedido = PedidoVisualizacao.model_validate_json(entrada)
+            else:
+                pedido = PedidoVisualizacao.model_validate(entrada)
+        except ValidationError as erro:
+            return {"erro": "Pedido inválido", "detalhes": erro.errors(include_url=False, include_context=False)}
+
+        resultado = self.executar(pedido.inicio, pedido.fim)
+
+        # por enquanto só livres; ocupados e conflitos ficam fora
+
+        return {"livres": resultado["livres"], "total_minutos_livres": resultado["total_minutos_livres"]}
 
     def executar(self, inicio: datetime, fim: datetime) -> dict:
         """Busca os eventos do período e devolve a visualização.
