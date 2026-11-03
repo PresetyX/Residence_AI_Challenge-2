@@ -1,18 +1,36 @@
-
 """
-Valida dados e realiza a criação de eventos no Google Calendar.
+Agente de criação de eventos no Google Calendar.
 
-Chamado pelo Supervisor do Destrava.
-Utiliza configurações do core e o cliente do Google Calendar.
+Segue o contrato padrão dos agentes (core/resposta.py):
+
+    inicio -> extrair_dados_evento(): o LLM transforma o pedido em JSON
+              {"titulo", "inicio", "fim"} e o código valida.
+    meio   -> criar_evento_google(): o código cria o evento na API e
+              conferir_periodo() checa se o período que voltou do Google é o
+              mesmo que foi pedido.
+    fim    -> responder_criacao(): o LLM confirma a criação em português.
+
+Contrato final (usado pelo supervisor):
+    AgenteCriar().executar_por_texto(pergunta) -> RespostaAgente
+    (use .para_dict() ou .para_json() para obter o JSON)
+
+Escopo OAuth: calendar (escrita).
 """
+
 import json
-
-from destrava.core.google_client import get_service
-from destrava.core.llm_client import perguntar
-from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
+from collections.abc import Callable
 from datetime import datetime
 
 from destrava.core import config
+from destrava.core.google_client import get_service
+from destrava.core.llm_client import extrair_json, perguntar
+from destrava.core.resposta import (
+    Periodo,
+    RespostaAgente,
+    ResultadoExecucao,
+    executar_fluxo,
+)
+from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
 def validar_dados_evento(dados: dict) -> dict:
@@ -117,6 +135,49 @@ def criar_evento_google(dados: dict, servico) -> dict:
     return resultado
 
 
+def conferir_periodo(pedido: dict, evento_criado: dict) -> tuple[Periodo, bool]:
+    """
+    Confere se o período que voltou do Google é o mesmo que foi pedido.
+
+    Args:
+        pedido: dados validados (saída de validar_dados_evento).
+        evento_criado: evento devolvido pela API do Google.
+
+    Returns:
+        (periodo, confere): o período REAL do evento criado (lido da resposta
+        do Google) e se ele bate com o início e o fim pedidos.
+
+    Raises:
+        RuntimeError: se a API não devolver o início ou o fim do evento.
+    """
+    inicio_google = evento_criado.get("start", {}).get("dateTime")
+    fim_google = evento_criado.get("end", {}).get("dateTime")
+
+    if not inicio_google or not fim_google:
+        raise RuntimeError("A API não retornou o período do evento criado.")
+
+    periodo = Periodo.de(
+        datetime.fromisoformat(inicio_google.replace("Z", "+00:00")),
+        datetime.fromisoformat(fim_google.replace("Z", "+00:00")),
+    )
+    pedido_inicio = datetime.fromisoformat(pedido["inicio"])
+    pedido_fim = datetime.fromisoformat(pedido["fim"])
+
+    confere = periodo.inicio == pedido_inicio and periodo.fim == pedido_fim
+    return periodo, confere
+
+
+def resumir_evento(evento_criado: dict, periodo: Periodo) -> dict:
+    """Pega só os campos úteis do evento do Google (para o JSON e o prompt)."""
+    return {
+        "id": evento_criado["id"],
+        "titulo": evento_criado.get("summary", ""),
+        "inicio": periodo.inicio.isoformat(),
+        "fim": periodo.fim.isoformat(),
+        "duracao_minutos": periodo.duracao_minutos,
+        "link": evento_criado.get("htmlLink"),
+    }
+
 
 def extrair_dados_evento(pergunta: str) -> dict:
     """
@@ -140,28 +201,50 @@ def extrair_dados_evento(pergunta: str) -> dict:
         pergunta_do_usuario=pergunta
     )
 
-    resposta = perguntar(prompt).strip()
-
-    # Remove blocos Markdown que o Gemma pode retornar.
-    if resposta.startswith("```json"):
-        resposta = resposta[7:]
-    elif resposta.startswith("```"):
-        resposta = resposta[3:]
-
-    if resposta.endswith("```"):
-        resposta = resposta[:-3]
-
-    try:
-        dados = json.loads(resposta.strip())
-    except json.JSONDecodeError as erro:
-        raise ValueError(
-            "O Gemma não retornou um JSON válido."
-        ) from erro
-
-    if not isinstance(dados, dict):
-        raise ValueError("O Gemma não retornou um objeto JSON.")
+    dados = extrair_json(perguntar(prompt))
 
     return validar_dados_evento(dados)
+
+
+def responder_criacao(pergunta: str, evento_criado: dict) -> str:
+    """
+    Gera uma resposta em português sobre o evento criado.
+
+    Args:
+        pergunta: Solicitação original do usuário.
+        evento_criado: Evento criado (resumo ou o retorno bruto do Google).
+
+    Returns:
+        str: Resposta em português confirmando a criação.
+
+    Raises:
+        ValueError: Se não houver confirmação de criação.
+        ErroLLM: Se o modelo não conseguir responder.
+    """
+    if not evento_criado.get("id"):
+        raise ValueError("O evento não possui confirmação de criação.")
+
+    prompt = PROMPT_RESPOSTA.format(
+        pergunta_do_usuario=pergunta,
+        evento_criado=json.dumps(
+            evento_criado,
+            ensure_ascii=False,
+            indent=2
+        )
+    )
+
+    return perguntar(prompt).strip()
+
+
+def _mensagem_padrao(dados: dict) -> str:
+    """Mensagem usada se o LLM falhar depois do evento já criado."""
+    evento = dados["evento"]
+    inicio = datetime.fromisoformat(evento["inicio"])
+    fim = datetime.fromisoformat(evento["fim"])
+    return (
+        f'Evento "{evento["titulo"]}" criado em {inicio:%d/%m/%Y}, '
+        f"das {inicio:%H:%M} às {fim:%H:%M}."
+    )
 
 
 class AgenteCriar:
@@ -189,33 +272,53 @@ class AgenteCriar:
 
         return criar_evento_google(dados, servico)
 
-        
+    def executar_por_texto(
+        self,
+        pergunta: str,
+        confirmar: Callable[[dict], bool] | None = None,
+    ) -> RespostaAgente:
+        """
+        Contrato final do agente: recebe texto e devolve o JSON padrão.
 
-def responder_criacao(pergunta: str, evento_criado: dict) -> str:
-    """
-    Gera uma resposta em português sobre o evento criado.
+        Args:
+            pergunta: pedido do usuário em texto livre.
+            confirmar: opcional. Recebe os dados extraídos e devolve True
+                para criar ou False para cancelar (ex.: pedir "CRIAR" no
+                terminal). Sem ele, o evento é criado direto.
 
-    Args:
-        pergunta: Solicitação original do usuário.
-        evento_criado: Evento retornado pela API do Google.
+        Returns:
+            RespostaAgente com acao "evento_criado" e, em ``dados``:
+                - evento: id, titulo, inicio, fim, duracao_minutos, link
+                - periodo_confere: se o período devolvido pelo Google é
+                  igual ao pedido
+        """
 
-    Returns:
-        str: Resposta em português confirmando a criação.
+        def executar(pedido: dict) -> ResultadoExecucao:
+            evento_criado = self.executar(pedido)
+            periodo, confere = conferir_periodo(pedido, evento_criado)
+            dados = {
+                "evento": resumir_evento(evento_criado, periodo),
+                "periodo_confere": confere,
+            }
+            detalhe = {
+                "evento_id": evento_criado["id"],
+                "periodo_pedido": {"inicio": pedido["inicio"], "fim": pedido["fim"]},
+                "periodo_retornado": {
+                    "inicio": periodo.inicio.isoformat(),
+                    "fim": periodo.fim.isoformat(),
+                },
+                "periodo_confere": confere,
+            }
+            return ResultadoExecucao(dados=dados, periodo=periodo, detalhe=detalhe)
 
-    Raises:
-        ValueError: Se não houver confirmação de criação.
-        ErroLLM: Se o modelo não conseguir responder.
-    """
-    if not evento_criado.get("id"):
-        raise ValueError("O evento não possui confirmação de criação.")
-
-    prompt = PROMPT_RESPOSTA.format(
-        pergunta_do_usuario=pergunta,
-        evento_criado=json.dumps(
-            evento_criado,
-            ensure_ascii=False,
-            indent=2
+        return executar_fluxo(
+            agente="criar",
+            acao_sucesso="evento_criado",
+            acao_erro="evento_nao_criado",
+            pergunta=pergunta,
+            extrair=extrair_dados_evento,
+            executar=executar,
+            responder=lambda p, dados: responder_criacao(p, dados["evento"]),
+            mensagem_padrao=_mensagem_padrao,
+            confirmar=confirmar,
         )
-    )
-
-    return perguntar(prompt).strip()

@@ -3,20 +3,33 @@
 Teste interativo do Agente de Criação com o Google Calendar real.
 
 Usa Gemma 2 para interpretar pedidos em linguagem natural.
-Solicita confirmação antes de criar cada evento.
+Solicita confirmação antes de criar cada evento e mostra o JSON padrão
+(agente, status, acao, mensagem, periodo, dados, fluxo inicio/meio/fim, erro).
+
+Uso:
+    python -m scripts.teste_criar_real
 """
 
 from datetime import datetime
 
-from destrava.agents.criar import (
-    AgenteCriar,
-    extrair_dados_evento,
-    responder_criacao
-)
+from destrava.agents.criar import AgenteCriar
+
 
 def formatar_data(data_iso: str) -> str:
     """Converte a data ISO para um formato legível."""
     return datetime.fromisoformat(data_iso).strftime("%d/%m/%Y às %H:%M")
+
+
+def confirmar(dados: dict) -> bool:
+    """Mostra o evento interpretado e pede a confirmação do usuário."""
+    print("\n=== EVENTO INTERPRETADO ===")
+    print("Título:", dados["titulo"])
+    print("Início:", formatar_data(dados["inicio"]))
+    print("Fim:", formatar_data(dados["fim"]))
+
+    return input(
+        "\nDigite CRIAR para adicionar o evento à agenda real: "
+    ).strip() == "CRIAR"
 
 
 def main():
@@ -36,50 +49,17 @@ def main():
         if not pedido:
             continue
 
-        try:
-            dados = extrair_dados_evento(pedido)
-        except ValueError as erro:
-            print(f"\n[erro] {erro}")
-            print("Informe novamente o pedido com os dados completos.\n")
-            continue
+        resposta = agente.executar_por_texto(pedido, confirmar=confirmar)
 
-        print("\n=== EVENTO INTERPRETADO ===")
-        print("Título:", dados["titulo"])
-        print("Início:", formatar_data(dados["inicio"]))
-        print("Fim:", formatar_data(dados["fim"]))
+        print("\n=== RESPOSTA (JSON) ===")
+        print(resposta.para_json())
 
-        confirmacao = input(
-            "\nDigite CRIAR para adicionar o evento à agenda real: "
-        ).strip()
-
-        if confirmacao != "CRIAR":
-            print("Criação cancelada.\n")
-            continue
-
-        try:
-            resultado = agente.executar(dados)
-        except Exception as erro:
-            print(f"\n[erro] Não foi possível confirmar a criação: {erro}")
-            print("Verifique a agenda antes de tentar novamente.\n")
-            continue
-
-        print("\n=== EVENTO CRIADO ===")
-        print("ID:", resultado["id"])
-        print("Título:", resultado.get("summary"))
-        print("Início:", resultado.get("start", {}).get("dateTime"))
-        print("Fim:", resultado.get("end", {}).get("dateTime"))
-        print("Link:", resultado.get("htmlLink", "Não disponível"))
-        print()
-
-        
-        try:
-            print("\n=== RESPOSTA DO GEMMA ===")
-            print(responder_criacao(pedido, resultado))
-        except Exception as erro:
+        if resposta.status == "sucesso" and not resposta.dados["periodo_confere"]:
             print(
-                f"Evento criado (ID: {resultado['id']}), "
-                f"mas não foi possível gerar a resposta: {erro}"
+                "\n[aviso] O período salvo no Google é diferente do pedido. "
+                "Confira o evento na agenda."
             )
+        print()
 
 
 if __name__ == "__main__":
