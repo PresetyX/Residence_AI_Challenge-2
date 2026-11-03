@@ -5,6 +5,11 @@ Valida dados e realiza a criação de eventos no Google Calendar.
 Chamado pelo Supervisor do Destrava.
 Utiliza configurações do core e o cliente do Google Calendar.
 """
+import json
+
+from destrava.core.google_client import get_service
+from destrava.core.llm_client import perguntar
+from destrava.prompts.criar import PROMPT_EXTRACAO
 
 from datetime import datetime
 
@@ -111,3 +116,76 @@ def criar_evento_google(dados: dict, servico) -> dict:
         )
 
     return resultado
+
+
+
+def extrair_dados_evento(pergunta: str) -> dict:
+    """
+    Extrai e valida os dados de um evento usando o Gemma 2.
+
+    Args:
+        pergunta: Solicitação do usuário em linguagem natural.
+
+    Returns:
+        dict: Dados do evento validados.
+
+    Raises:
+        ValueError: Se a resposta não for um JSON válido
+            ou se os dados estiverem incompletos.
+    """
+    hoje = datetime.now(config.FUSO).date().isoformat()
+
+    prompt = PROMPT_EXTRACAO.format(
+        data_de_hoje=hoje,
+        fuso=str(config.FUSO),
+        pergunta_do_usuario=pergunta
+    )
+
+    resposta = perguntar(prompt).strip()
+
+    # Remove blocos Markdown que o Gemma pode retornar.
+    if resposta.startswith("```json"):
+        resposta = resposta[7:]
+    elif resposta.startswith("```"):
+        resposta = resposta[3:]
+
+    if resposta.endswith("```"):
+        resposta = resposta[:-3]
+
+    try:
+        dados = json.loads(resposta.strip())
+    except json.JSONDecodeError as erro:
+        raise ValueError(
+            "O Gemma não retornou um JSON válido."
+        ) from erro
+
+    if not isinstance(dados, dict):
+        raise ValueError("O Gemma não retornou um objeto JSON.")
+
+    return validar_dados_evento(dados)
+
+
+class AgenteCriar:
+    """Agente responsável por criar eventos no Google Calendar."""
+
+    def executar(self, dados: dict) -> dict:
+        """
+        Cria um evento previamente autorizado pelo Supervisor.
+
+        Args:
+            dados: Dicionário com título, início e fim.
+
+        Returns:
+            dict: Evento criado, retornado pela API do Google.
+
+        Raises:
+            ValueError: Se os dados forem inválidos.
+            RuntimeError: Se a API não retornar o ID do evento.
+            HttpError: Se a API do Google retornar um erro.
+
+        Escopo OAuth:
+            calendar
+        """
+        servico = get_service([config.ESCOPO_CALENDARIO])
+
+        return criar_evento_google(dados, servico)
