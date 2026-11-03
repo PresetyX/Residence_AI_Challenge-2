@@ -9,8 +9,7 @@ import json
 
 from destrava.core.google_client import get_service
 from destrava.core.llm_client import perguntar
-from destrava.prompts.criar import PROMPT_EXTRACAO
-
+from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 from datetime import datetime
 
 from destrava.core import config
@@ -189,3 +188,34 @@ class AgenteCriar:
         servico = get_service([config.ESCOPO_CALENDARIO])
 
         return criar_evento_google(dados, servico)
+
+        
+
+def responder_criacao(pergunta: str, evento_criado: dict) -> str:
+    """
+    Gera uma resposta em português sobre o evento criado.
+
+    Args:
+        pergunta: Solicitação original do usuário.
+        evento_criado: Evento retornado pela API do Google.
+
+    Returns:
+        str: Resposta em português confirmando a criação.
+
+    Raises:
+        ValueError: Se não houver confirmação de criação.
+        ErroLLM: Se o modelo não conseguir responder.
+    """
+    if not evento_criado.get("id"):
+        raise ValueError("O evento não possui confirmação de criação.")
+
+    prompt = PROMPT_RESPOSTA.format(
+        pergunta_do_usuario=pergunta,
+        evento_criado=json.dumps(
+            evento_criado,
+            ensure_ascii=False,
+            indent=2
+        )
+    )
+
+    return perguntar(prompt).strip()

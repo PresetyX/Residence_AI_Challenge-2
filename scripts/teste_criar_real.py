@@ -8,8 +8,11 @@ Solicita confirmação antes de criar cada evento.
 
 from datetime import datetime
 
-from destrava.agents.criar import AgenteCriar, extrair_dados_evento
-
+from destrava.agents.criar import (
+    AgenteCriar,
+    extrair_dados_evento,
+    responder_criacao
+)
 
 def formatar_data(data_iso: str) -> str:
     """Converte a data ISO para um formato legível."""
@@ -67,6 +70,16 @@ def main():
         print("Fim:", resultado.get("end", {}).get("dateTime"))
         print("Link:", resultado.get("htmlLink", "Não disponível"))
         print()
+
+        
+        try:
+            print("\n=== RESPOSTA DO GEMMA ===")
+            print(responder_criacao(pedido, resultado))
+        except Exception as erro:
+            print(
+                f"Evento criado (ID: {resultado['id']}), "
+                f"mas não foi possível gerar a resposta: {erro}"
+            )
 
 
 if __name__ == "__main__":
