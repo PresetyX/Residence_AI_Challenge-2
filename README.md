@@ -46,7 +46,7 @@ Na primeira execução, o navegador abre para você autorizar o acesso e um arqu
 
 ```
 destrava/
-├── core/      configurações e conexões compartilhadas (config, google_client, llm_client)
+├── core/      configurações e conexões compartilhadas (config, google_client, llm_client, resposta)
 ├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
 └── prompts/   prompts de cada agente
 docs/          documentação técnica de cada agente
@@ -62,6 +62,21 @@ Para conferir se a configuração carrega, na raiz do projeto:
 python -c "from destrava.core import config; print(config.MODELO, config.FUSO)"
 ```
 
+## Executar
+
+```
+python cli.py            # escolhe o agente e mostra o JSON completo
+python cli.py --texto    # mostra só a mensagem final
+```
+
+Todos os agentes devolvem o mesmo JSON (`agente`, `status`, `acao`, `mensagem`, `periodo`, `dados`, `fluxo` com início/meio/fim e `erro`). O formato está em [`docs/contrato.md`](docs/contrato.md).
+
+## Testes
+
+```
+python -m pytest tests/
+```
+
 ## Documentação
 
-A documentação técnica de cada agente fica na pasta `docs/`.
+A documentação técnica de cada agente fica na pasta `docs/`. O contrato comum a todos está em `docs/contrato.md`.
