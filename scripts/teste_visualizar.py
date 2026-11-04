@@ -1,19 +1,49 @@
-"""Teste manual do AgenteVisualizar com a agenda real (Passo 1).
+"""Teste manual do AgenteVisualizar com a agenda real.
 
-Uso:
-    python teste_visualizar.py              -> testa o dia de amanhã
-    python teste_visualizar.py 2026-10-29   -> testa um dia específico
+Consulta um dia inteiro do Google Agenda e imprime, em sequência:
+    1. Os horários ocupados (eventos e dias inteiros).
+    2. Os horários livres, com a duração de cada um.
+    3. Os conflitos entre eventos (ou "Nenhum").
+    4. Os totais de minutos livres e ocupados.
+
+Diferença em relação ao cli.py: aqui o período é definido pelo próprio
+script (o dia escolhido, de 00:00 a 00:00 do dia seguinte) e o resultado
+completo de executar() é mostrado, incluindo ocupados e conflitos. O cli.py
+testa o contrato JSON (executar_json), que devolve só os horários livres.
+
+Uso (na raiz do projeto, com -m para o Python encontrar o pacote destrava):
+    python -m scripts.teste_visualizar              -> testa o dia de amanhã
+    python -m scripts.teste_visualizar 2026-10-29   -> testa um dia específico
+
+Requisitos:
+    - credentials.json na raiz do projeto (na primeira vez, o navegador abre
+      para autorizar a leitura da agenda).
 """
 
 import sys
+import json
+
 from datetime import date, datetime, timedelta
 
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
-from destrava.agents.visualizar import responder
+
 
 def formatar(texto_iso: str) -> str:
-    """Converte '2026-10-29T09:00:00-03:00' em '29/10 09:00'."""
+    """Converte uma data e hora em ISO 8601 para o formato curto dia/mês hora.
+
+    Exemplo: '2026-10-29T09:00:00-03:00' vira '29/10 09:00'.
+
+    Args:
+        texto_iso: data e hora em texto no formato ISO 8601, como as que o
+            AgenteVisualizar devolve.
+
+    Returns:
+        Texto no formato "DD/MM HH:MM".
+
+    Raises:
+        ValueError: se o texto não estiver em formato ISO 8601 válido.
+    """
     return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
 
 
@@ -51,5 +81,6 @@ for conflito in resultado["conflitos"]:
 print(f"\nTotal livre: {resultado['total_minutos_livres']:.0f} min | "
       f"Total ocupado: {resultado['total_minutos_ocupados']:.0f} min")
 
-print("\n=== RESPOSTA DO GEMMA ===")
-print(responder("Como está minha agenda nesse dia?", resultado))
+print("\n=== JSON DO CONTRATO (executar_json) ===")
+pedido = {"inicio": inicio.isoformat(), "fim": fim.isoformat()}
+print(json.dumps(AgenteVisualizar().executar_json(pedido), ensure_ascii=False, indent=2))

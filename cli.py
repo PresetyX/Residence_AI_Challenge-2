@@ -1,69 +1,64 @@
-"""CLI do Destrava: conversa com os agentes da agenda e mostra o JSON.
+"""CLI do Destrava: agentes de visualização e criação da agenda.
 
-Todos os agentes devolvem o mesmo formato (ver destrava/core/resposta.py):
-agente, status, acao, mensagem, periodo, dados, fluxo (inicio/meio/fim) e erro.
+Contrato: cada agente recebe um JSON e devolve um JSON (sem LLM).
 
-Uso:
-    python cli.py            # mostra o JSON completo
-    python cli.py --texto    # mostra só a mensagem final
+    visualizar  entrada: {"inicio": "...", "fim": "..."}
+                saída:   {"livres": [...], "total_minutos_livres": ...}
+                Se "fim" for igual a "inicio", o período vira o dia inteiro.
+
+    criar       entrada: {"titulo": "...", "inicio": "...", "fim": "..."}
+                saída:   {"evento": {"id", "titulo", "inicio", "fim", "link"}}
+
+As datas são ISO 8601 (ex.: "2026-11-04T14:00:00-03:00"); sem fuso, valem no
+horário de config.FUSO. Pedido inválido devolve {"erro": "Pedido inválido", ...}.
+
+Uso (na raiz do projeto):
+    python cli.py
+    Agente: 1
+    JSON: {"inicio": "2026-11-04T00:00:00-03:00", "fim": "2026-11-05T00:00:00-03:00"}
 """
 
-import sys
-from datetime import datetime
+import json
 
 from destrava.agents.criar import AgenteCriar
 from destrava.agents.visualizar import AgenteVisualizar
 
-
-def _formatar(data_iso: str) -> str:
-    return datetime.fromisoformat(data_iso).strftime("%d/%m/%Y às %H:%M")
-
-
-def confirmar_criacao(dados: dict) -> bool:
-    """Mostra o evento interpretado e só cria se o usuário digitar CRIAR."""
-    print("\n=== EVENTO INTERPRETADO ===")
-    print("Título:", dados["titulo"])
-    print("Início:", _formatar(dados["inicio"]))
-    print("Fim:   ", _formatar(dados["fim"]))
-    return input("\nDigite CRIAR para adicionar à agenda real: ").strip() == "CRIAR"
-
+SAIR = ("sair", "exit", "quit")
 
 AGENTES = {
-    "1": ("visualizar", lambda pedido: AgenteVisualizar().executar_por_texto(pedido)),
-    "2": (
-        "criar",
-        lambda pedido: AgenteCriar().executar_por_texto(
-            pedido, confirmar=confirmar_criacao
-        ),
-    ),
+    "1": ("visualizar", AgenteVisualizar, '{"inicio": "...", "fim": "..."}'),
+    "2": ("criar", AgenteCriar, '{"titulo": "...", "inicio": "...", "fim": "..."}'),
 }
 
 
 def main():
-    so_texto = "--texto" in sys.argv[1:]
-
-    print("=== DESTRAVA ===")
     print("Agentes: 1 = visualizar, 2 = criar. Digite 'sair' para encerrar.\n")
 
     while True:
         escolha = input("Agente: ").strip().lower()
-        if escolha == "sair":
+
+        if escolha in SAIR:
             break
         if escolha not in AGENTES:
             print("Opção inválida.\n")
             continue
 
-        pedido = input("Você: ").strip()
-        if not pedido:
-            continue
-        if pedido.lower() == "sair":
+        nome, classe, exemplo = AGENTES[escolha]
+        print(f"Agente {nome}. Cole um JSON {exemplo}\n")
+
+        entrada = input("JSON: ").strip()
+
+        if entrada.lower() in SAIR:
             break
+        if not entrada:
+            continue
 
-        _, executar = AGENTES[escolha]
-        resposta = executar(pedido)
+        try:
+            resposta = classe().executar_json(entrada)
+            print(json.dumps(resposta, ensure_ascii=False, indent=2, default=str))
+        except Exception as erro:
+            print(f"[erro] {erro}")
 
-        print()
-        print(resposta.mensagem if so_texto else resposta.para_json())
         print()
 
 
