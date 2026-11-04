@@ -18,7 +18,14 @@ from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
 from destrava.core.google_client import get_service, listar_eventos
 from destrava.core.llm_client import perguntar
-from destrava.core.models import PedidoVisualizacao
+from destrava.core.models import (
+    ErroInfo,
+    Etapa,
+    FluxoVisualizacao,
+    PedidoVisualizacao,
+    Periodo,
+    RespostaVisualizacao,
+)
 from destrava.prompts.visualizar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
@@ -125,29 +132,70 @@ class AgenteVisualizar:
     """Agente de visualização: ocupados, livres e conflitos de um período."""
 
     def executar_json(self, entrada: dict | str) -> dict:
-        """Recebe o período em JSON e devolve os horários livres.
+        """Recebe o período em JSON e devolve os horários livres em JSON.
 
-    Args:
-        entrada: dict ou string JSON com "inicio" e "fim" (ISO 8601).
-            Se "fim" for igual a "inicio", o período vira um dia inteiro.
+        Args:
+            entrada: dict ou string JSON com "inicio" e "fim" (ISO 8601).
+                Se "fim" for igual a "inicio", o período vira um dia inteiro.
 
-    Returns:
-        {"livres": [...], "total_minutos_livres": ...} se o pedido for válido,
-        ou {"erro": "Pedido inválido", "detalhes": [...]} se não for.
-    """
+        Returns:
+            Dicionário com status, acao, periodo, dados, fluxo e erro.
+            - Sucesso: status "sucesso", periodo e dados (livres e
+              total_minutos_livres), com as três etapas do fluxo "ok".
+            - Erro: status "erro" e erro {tipo, mensagem}. A etapa que falhou
+              fica "erro" no fluxo e as seguintes ficam "pendente".
+        """
+        # 0. Cria o fluxo com as 3 etapas ainda pendentes.
+        fluxo = FluxoVisualizacao(
+            inicio = Etapa(etapa="validacao"),
+            meio = Etapa(etapa="google_calendar"),
+            fim = Etapa(etapa="calculo")
+        )
+        # 1. INÍCIO: valida o pedido.
         try:
             if isinstance(entrada, str):
                 pedido = PedidoVisualizacao.model_validate_json(entrada)
             else:
                 pedido = PedidoVisualizacao.model_validate(entrada)
         except ValidationError as erro:
-            return {"erro": "Pedido inválido", "detalhes": erro.errors(include_url=False, include_context=False)}
+            fluxo.inicio.status = "erro"
+            return RespostaVisualizacao(
+                status="erro", acao="agenda_nao_visualizada", fluxo=fluxo,
+                erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
+            ).model_dump(mode="json")
 
-        resultado = self.executar(pedido.inicio, pedido.fim)
+        fluxo.inicio.status = "ok"
+        fluxo.inicio.detalhe = {"inicio": pedido.inicio.isoformat(), "fim": pedido.fim.isoformat()}
 
-        # por enquanto só livres; ocupados e conflitos ficam fora
+        # 2. Período no fuso do projeto (vale para sucesso e para erro no meio).
+        inicio = normalizar_fuso(pedido.inicio)
+        fim = normalizar_fuso(pedido.fim)
+        periodo = Periodo(inicio=inicio, fim=fim, duracao_minutos=(fim - inicio).total_seconds() / 60)
 
-        return {"livres": resultado["livres"], "total_minutos_livres": resultado["total_minutos_livres"]}
+        # 3. MEIO + FIM: busca no Google e calcula
+        try:
+            resultado = self.executar(inicio, fim)
+        except Exception as erro:
+            fluxo.meio.status = "erro"
+            return RespostaVisualizacao(
+                status="erro", acao="agenda_nao_visualizada", periodo=periodo, fluxo=fluxo,
+                erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
+            ).model_dump(mode="json")
+
+        fluxo.meio.status = "ok"
+        fluxo.fim.status = "ok"
+
+        # 4. Sucesso. Por enquanto só livres; ocupados e conflitos ficam de fora.
+        return RespostaVisualizacao(
+            status="sucesso",
+            acao="agenda_visualizada",
+            periodo=periodo,
+            dados={
+                "livres": resultado["livres"],
+                "total_minutos_livres": resultado["total_minutos_livres"],
+            },
+            fluxo=fluxo,
+        ).model_dump(mode="json")
 
     def executar(self, inicio: datetime, fim: datetime) -> dict:
         """Busca os eventos do período e devolve a visualização.
