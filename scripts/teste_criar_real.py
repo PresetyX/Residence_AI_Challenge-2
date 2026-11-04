@@ -3,8 +3,8 @@
 Teste interativo do Agente de Criação com o Google Calendar real.
 
 Usa Gemma 2 para interpretar pedidos em linguagem natural.
-Solicita confirmação antes de criar cada evento e mostra o JSON padrão
-(agente, status, acao, mensagem, periodo, dados, fluxo inicio/meio/fim, erro).
+Solicita confirmação antes de criar cada evento e mostra a resposta em texto.
+Para testar o caminho em JSON (sem LLM), use: python cli.py (agente 2).
 
 Uso:
     python -m scripts.teste_criar_real
@@ -49,16 +49,14 @@ def main():
         if not pedido:
             continue
 
-        resposta = agente.executar_por_texto(pedido, confirmar=confirmar)
+        try:
+            resposta = agente.executar_por_texto(pedido, confirmar=confirmar)
+        except Exception as erro:
+            print(f"\n[erro] {erro}\n")
+            continue
 
-        print("\n=== RESPOSTA (JSON) ===")
-        print(resposta.para_json())
-
-        if resposta.status == "sucesso" and not resposta.dados["periodo_confere"]:
-            print(
-                "\n[aviso] O período salvo no Google é diferente do pedido. "
-                "Confira o evento na agenda."
-            )
+        print("\n=== RESPOSTA ===")
+        print(resposta)
         print()
 
 

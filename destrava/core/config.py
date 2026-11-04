@@ -19,19 +19,10 @@ from datetime import time, timedelta
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
-# MODELO
-# Qual cliente de LLM usar: "ollama" (oficial, llm_client.py) ou
-# "transformers" (alternativo, llm.py). Os agentes não mudam: sempre usam
-# perguntar() do llm_client.py, que repassa para o cliente escolhido aqui.
-CLIENTE_LLM = "ollama"
+# MODELO (usado pelo llm_client.py, via Ollama)
 MODELO = "gemma2:2b"            # depois: "gemma2:9b"
 OLLAMA_URL = "http://localhost:11434"
 TIMEOUT_LLM = 120
-
-# MODELO ALTERNATIVO (core/llm.py, via transformers, para quem não pode usar o Ollama)
-MODELO_TRANSFORMERS = "Qwen/Qwen2.5-1.5B-Instruct"
-MAX_TOKENS_TRANSFORMERS = 350
-TEMPERATURA_TRANSFORMERS = 0.3
 
 # ROTINA
 FUSO = ZoneInfo("America/Sao_Paulo")

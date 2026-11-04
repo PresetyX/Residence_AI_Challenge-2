@@ -4,9 +4,5 @@ google-api-python-client==2.108.0
 google-auth-httplib2==0.2.0
 google-auth-oauthlib==1.2.1
 cryptography==43.0.3
-transformers==4.48.0
-accelerate==1.2.1
-sentencepiece==0.2.0
-torch==2.5.1
 pytest==8.3.4
 tzdata

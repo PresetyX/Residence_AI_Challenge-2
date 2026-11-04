@@ -1,19 +1,16 @@
 """
 Agente de criação de eventos no Google Calendar.
 
-Segue o contrato padrão dos agentes (core/resposta.py):
+Segue a mesma lógica do agente de visualização:
 
-    inicio -> extrair_dados_evento(): o LLM transforma o pedido em JSON
-              {"titulo", "inicio", "fim"} e o código valida.
-    meio   -> criar_evento_google(): o código cria o evento na API e
-              conferir_periodo() checa se o período que voltou do Google é o
-              mesmo que foi pedido.
-    fim    -> responder_criacao(): o LLM confirma a criação em português.
+    executar_json(entrada)  -> recebe o evento em JSON, valida com o
+                               PedidoCriacao (core/models.py), cria o evento
+                               e devolve JSON. Não usa LLM.
+    executar_por_texto(...) -> recebe o pedido em texto, extrai o evento com o
+                               LLM (PROMPT_EXTRACAO), cria o evento e responde
+                               em português com o LLM (PROMPT_RESPOSTA).
 
-Contrato final (usado pelo supervisor):
-    AgenteCriar().executar_por_texto(pergunta) -> RespostaAgente
-    (use .para_dict() ou .para_json() para obter o JSON)
-
+Chamado pelo Supervisor do Destrava.
 Escopo OAuth: calendar (escrita).
 """
 
@@ -21,15 +18,12 @@ import json
 from collections.abc import Callable
 from datetime import datetime
 
+from pydantic import ValidationError
+
 from destrava.core import config
 from destrava.core.google_client import get_service
 from destrava.core.llm_client import extrair_json, perguntar
-from destrava.core.resposta import (
-    Periodo,
-    RespostaAgente,
-    ResultadoExecucao,
-    executar_fluxo,
-)
+from destrava.core.models import PedidoCriacao
 from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
@@ -37,53 +31,33 @@ def validar_dados_evento(dados: dict) -> dict:
     """
     Valida os dados recebidos para criar um evento.
 
+    As regras ficam no PedidoCriacao (core/models.py): título obrigatório,
+    início anterior ao fim e nada no passado. Datas sem fuso são consideradas
+    no horário de config.FUSO.
+
     Args:
         dados (dict): Dicionário contendo título, início e fim.
 
     Returns:
-        dict: Dados validados com datas no fuso do projeto.
+        dict: Dados validados com datas (texto ISO 8601) no fuso do projeto.
 
     Raises:
         ValueError: Se algum campo estiver ausente,
             inválido ou com horário inconsistente.
     """
-
-    titulo = dados.get("titulo")
-    inicio = dados.get("inicio")
-    fim = dados.get("fim")
-
-    if not isinstance(titulo, str) or not titulo.strip():
-        raise ValueError("O título do evento é obrigatório.")
-
-    if not isinstance(inicio, str) or not isinstance(fim, str):
-        raise ValueError("Início e fim são obrigatórios.")
-
     try:
-        data_inicio = datetime.fromisoformat(inicio)
-        data_fim = datetime.fromisoformat(fim)
-    except ValueError as erro:
-        raise ValueError("Data ou horário inválido.") from erro
-
-    if data_inicio.tzinfo is None:
-        data_inicio = data_inicio.replace(tzinfo=config.FUSO)
-    else:
-        data_inicio = data_inicio.astimezone(config.FUSO)
-
-    if data_fim.tzinfo is None:
-        data_fim = data_fim.replace(tzinfo=config.FUSO)
-    else:
-        data_fim = data_fim.astimezone(config.FUSO)
-
-    if data_inicio >= data_fim:
-        raise ValueError("O início deve ser anterior ao fim.")
-
-    if data_inicio <= datetime.now(config.FUSO):
-        raise ValueError("Não é permitido criar eventos no passado.")
+        pedido = PedidoCriacao.model_validate(dados)
+    except ValidationError as erro:
+        mensagens = [
+            detalhe["msg"].removeprefix("Value error, ")
+            for detalhe in erro.errors(include_url=False, include_context=False)
+        ]
+        raise ValueError(" ".join(dict.fromkeys(mensagens))) from erro
 
     return {
-        "titulo": titulo.strip(),
-        "inicio": data_inicio.isoformat(),
-        "fim": data_fim.isoformat()
+        "titulo": pedido.titulo,
+        "inicio": pedido.inicio.isoformat(),
+        "fim": pedido.fim.isoformat(),
     }
 
 
@@ -135,50 +109,6 @@ def criar_evento_google(dados: dict, servico) -> dict:
     return resultado
 
 
-def conferir_periodo(pedido: dict, evento_criado: dict) -> tuple[Periodo, bool]:
-    """
-    Confere se o período que voltou do Google é o mesmo que foi pedido.
-
-    Args:
-        pedido: dados validados (saída de validar_dados_evento).
-        evento_criado: evento devolvido pela API do Google.
-
-    Returns:
-        (periodo, confere): o período REAL do evento criado (lido da resposta
-        do Google) e se ele bate com o início e o fim pedidos.
-
-    Raises:
-        RuntimeError: se a API não devolver o início ou o fim do evento.
-    """
-    inicio_google = evento_criado.get("start", {}).get("dateTime")
-    fim_google = evento_criado.get("end", {}).get("dateTime")
-
-    if not inicio_google or not fim_google:
-        raise RuntimeError("A API não retornou o período do evento criado.")
-
-    periodo = Periodo.de(
-        datetime.fromisoformat(inicio_google.replace("Z", "+00:00")),
-        datetime.fromisoformat(fim_google.replace("Z", "+00:00")),
-    )
-    pedido_inicio = datetime.fromisoformat(pedido["inicio"])
-    pedido_fim = datetime.fromisoformat(pedido["fim"])
-
-    confere = periodo.inicio == pedido_inicio and periodo.fim == pedido_fim
-    return periodo, confere
-
-
-def resumir_evento(evento_criado: dict, periodo: Periodo) -> dict:
-    """Pega só os campos úteis do evento do Google (para o JSON e o prompt)."""
-    return {
-        "id": evento_criado["id"],
-        "titulo": evento_criado.get("summary", ""),
-        "inicio": periodo.inicio.isoformat(),
-        "fim": periodo.fim.isoformat(),
-        "duracao_minutos": periodo.duracao_minutos,
-        "link": evento_criado.get("htmlLink"),
-    }
-
-
 def extrair_dados_evento(pergunta: str) -> dict:
     """
     Extrai e valida os dados de um evento usando o Gemma 2.
@@ -212,7 +142,7 @@ def responder_criacao(pergunta: str, evento_criado: dict) -> str:
 
     Args:
         pergunta: Solicitação original do usuário.
-        evento_criado: Evento criado (resumo ou o retorno bruto do Google).
+        evento_criado: Evento retornado pela API do Google.
 
     Returns:
         str: Resposta em português confirmando a criação.
@@ -236,19 +166,57 @@ def responder_criacao(pergunta: str, evento_criado: dict) -> str:
     return perguntar(prompt).strip()
 
 
-def _mensagem_padrao(dados: dict) -> str:
-    """Mensagem usada se o LLM falhar depois do evento já criado."""
-    evento = dados["evento"]
-    inicio = datetime.fromisoformat(evento["inicio"])
-    fim = datetime.fromisoformat(evento["fim"])
-    return (
-        f'Evento "{evento["titulo"]}" criado em {inicio:%d/%m/%Y}, '
-        f"das {inicio:%H:%M} às {fim:%H:%M}."
-    )
-
-
 class AgenteCriar:
     """Agente responsável por criar eventos no Google Calendar."""
+
+    def executar_json(self, entrada: dict | str) -> dict:
+        """Recebe o evento em JSON, cria na agenda e devolve JSON (sem LLM).
+
+        Args:
+            entrada: dict ou string JSON com "titulo", "inicio" e "fim"
+                (ISO 8601). Datas sem fuso valem no horário de config.FUSO.
+
+        Returns:
+            {"evento": {"id", "titulo", "inicio", "fim", "link"}} se o evento
+            foi criado, ou {"erro": "Pedido inválido", "detalhes": [...]}
+            se o pedido não passar na validação (nada é criado).
+
+        Raises:
+            RuntimeError: Se a API não retornar o ID do evento.
+            HttpError: Se a API do Google retornar um erro.
+
+        Escopo OAuth: calendar (config.ESCOPO_CALENDARIO).
+        """
+        try:
+            if isinstance(entrada, str):
+                pedido = PedidoCriacao.model_validate_json(entrada)
+            else:
+                pedido = PedidoCriacao.model_validate(entrada)
+        except ValidationError as erro:
+            return {
+                "erro": "Pedido inválido",
+                "detalhes": erro.errors(include_url=False, include_context=False),
+            }
+
+        criado = self.executar(
+            {
+                "titulo": pedido.titulo,
+                "inicio": pedido.inicio.isoformat(),
+                "fim": pedido.fim.isoformat(),
+            }
+        )
+
+        return {
+            "evento": {
+                "id": criado["id"],
+                "titulo": criado.get("summary", pedido.titulo),
+                "inicio": criado.get("start", {}).get(
+                    "dateTime", pedido.inicio.isoformat()
+                ),
+                "fim": criado.get("end", {}).get("dateTime", pedido.fim.isoformat()),
+                "link": criado.get("htmlLink"),
+            }
+        }
 
     def executar(self, dados: dict) -> dict:
         """
@@ -276,9 +244,14 @@ class AgenteCriar:
         self,
         pergunta: str,
         confirmar: Callable[[dict], bool] | None = None,
-    ) -> RespostaAgente:
-        """
-        Contrato final do agente: recebe texto e devolve o JSON padrão.
+    ) -> str:
+        """Recebe o pedido em texto e devolve texto.
+
+        Fluxo:
+            1. O LLM transforma o pedido em título, início e fim.
+            2. Se houver ``confirmar``, pede a confirmação antes de criar.
+            3. Código cria o evento (sem LLM).
+            4. O LLM escreve a confirmação em português.
 
         Args:
             pergunta: pedido do usuário em texto livre.
@@ -287,38 +260,17 @@ class AgenteCriar:
                 terminal). Sem ele, o evento é criado direto.
 
         Returns:
-            RespostaAgente com acao "evento_criado" e, em ``dados``:
-                - evento: id, titulo, inicio, fim, duracao_minutos, link
-                - periodo_confere: se o período devolvido pelo Google é
-                  igual ao pedido
+            Texto curto em português confirmando a criação (ou o aviso de
+            que foi cancelada).
+
+        Raises:
+            ValueError: Se o pedido não tiver título, início e fim válidos.
         """
+        dados = extrair_dados_evento(pergunta)
 
-        def executar(pedido: dict) -> ResultadoExecucao:
-            evento_criado = self.executar(pedido)
-            periodo, confere = conferir_periodo(pedido, evento_criado)
-            dados = {
-                "evento": resumir_evento(evento_criado, periodo),
-                "periodo_confere": confere,
-            }
-            detalhe = {
-                "evento_id": evento_criado["id"],
-                "periodo_pedido": {"inicio": pedido["inicio"], "fim": pedido["fim"]},
-                "periodo_retornado": {
-                    "inicio": periodo.inicio.isoformat(),
-                    "fim": periodo.fim.isoformat(),
-                },
-                "periodo_confere": confere,
-            }
-            return ResultadoExecucao(dados=dados, periodo=periodo, detalhe=detalhe)
+        if confirmar is not None and not confirmar(dados):
+            return "Criação cancelada. Nada foi alterado na agenda."
 
-        return executar_fluxo(
-            agente="criar",
-            acao_sucesso="evento_criado",
-            acao_erro="evento_nao_criado",
-            pergunta=pergunta,
-            extrair=extrair_dados_evento,
-            executar=executar,
-            responder=lambda p, dados: responder_criacao(p, dados["evento"]),
-            mensagem_padrao=_mensagem_padrao,
-            confirmar=confirmar,
-        )
+        evento_criado = self.executar(dados)
+
+        return responder_criacao(pergunta, evento_criado)

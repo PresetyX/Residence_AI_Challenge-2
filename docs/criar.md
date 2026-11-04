@@ -1,54 +1,74 @@
 # Agente Criar
 
 > Documentação técnica do **estado atual** do agente. A história (decisões, problemas, testes) fica no Google Docs.
-> Itens em *itálico* são orientações do que escrever. Troque pelo conteúdo real e apague a orientação.
 
 ## Objetivo
 
-Cria um evento na agenda a partir de um pedido em linguagem natural.
-*Escreva em 2 ou 3 linhas o que o agente faz e o que não faz.*
+Cria um evento no Google Agenda a partir de um JSON com título, início e fim (ou, no caminho em texto, de um pedido em linguagem natural).
+Não edita nem exclui eventos, e não verifica conflito com outros compromissos.
 
 ## Contrato
 
-O que entra e o que sai, para o supervisor saber como chamá-lo.
+O que entra e o que sai, para o supervisor saber como chamá-lo. O formato completo está em [contrato.md](contrato.md).
 
 | | |
 |---|---|
-| **Entrada** | texto: o pedido do usuário (ex.: "marque dentista amanhã às 15h") |
-| **Saída** | JSON padrão (ver [contrato.md](contrato.md)): `acao: "evento_criado"`, `periodo` lido da resposta do Google e `dados.periodo_confere` |
-| **Função de entrada** | `AgenteCriar().executar_por_texto(pedido, confirmar=None) -> RespostaAgente` (`.para_json()` / `.para_dict()`) |
+| **Entrada** | JSON (`dict` ou string): `{"titulo": "...", "inicio": "...", "fim": "..."}` (ISO 8601; sem fuso vale `config.FUSO`) |
+| **Saída** | JSON: `{"evento": {"id", "titulo", "inicio", "fim", "link"}}` ou `{"erro": "Pedido inválido", "detalhes": [...]}` |
+| **Função de entrada** | `AgenteCriar().executar_json(entrada) -> dict` (sem LLM) |
+| **Caminho em texto** | `AgenteCriar().executar_por_texto(pedido, confirmar=None) -> str` (LLM extrai o evento e escreve a resposta) |
 
 ## Fluxo
 
-Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
+Caminho em JSON (`executar_json`), sem LLM:
 
 | # | Passo | Quem |
 |---|---|---|
-| 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
-| 2 | Cria o evento no Google Agenda e confere se o período retornado é o pedido (`conferir_periodo`) | Código |
-| 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
+| 1 | Valida o pedido com o `PedidoCriacao` (`core/models.py`) | Código |
+| 2 | Cria o evento no Google Agenda (`criar_evento_google`) | Código |
+| 3 | Devolve o evento criado em JSON | Código |
 
-*Ajuste os passos se o seu agente tiver mais etapas.*
+Caminho em texto (`executar_por_texto`):
+
+| # | Passo | Quem |
+|---|---|---|
+| 1 | Extrai título, início e fim do pedido em JSON (`PROMPT_EXTRACAO`) | LLM |
+| 2 | Pede confirmação, se `confirmar` foi passado | Código |
+| 3 | Cria o evento no Google Agenda | Código |
+| 4 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
 
 ## Regras
 
-*Defina as regras do agente.* Exemplos de decisões: o que fazer se o horário conflitar com outro evento; duração padrão quando o usuário não informa o fim; campos obrigatórios (título, início) e o que perguntar se faltar algum.
+- `titulo` obrigatório (espaços nas pontas são removidos).
+- `inicio` e `fim` obrigatórios, com `inicio` anterior ao `fim`.
+- Não cria evento no passado.
+- Datas sem fuso valem no horário de `config.FUSO`.
+- Pedido inválido não chama o Google: devolve `{"erro": "Pedido inválido", ...}`.
 
 Os valores compartilhados (fuso, horários) estão em `destrava/core/config.py`.
 
 ## Dependências do core
 
 - `google_client`: `get_service` com o escopo de **escrita** (`calendar`).
-- `llm_client`: `perguntar(prompt)`.
-- `config`: *liste só o que este agente usa.*
+- `llm_client`: `perguntar(prompt)` e `extrair_json(texto)` (só no caminho em texto).
+- `models`: `PedidoCriacao`.
+- `config`: `FUSO` e `ESCOPO_CALENDARIO`.
 - `prompts/criar.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
 
 ## Como testar
 
-*Preencha quando o agente estiver rodando: o que precisa estar ativo e 3 a 5 pedidos de exemplo com o resultado esperado.*
+Sem Google e sem Ollama: `python -m pytest tests/` (o Google é simulado e o LLM é bloqueado no caminho em JSON).
+
+Com o Google real (precisa do `credentials.json` na raiz): `python cli.py`, escolha o agente `2` e cole, por exemplo:
+
+```
+{"titulo": "Dentista", "inicio": "2026-11-15T15:00", "fim": "2026-11-15T16:00"}
+```
+
+Para testar o caminho em texto (precisa do Ollama): `python -m scripts.teste_criar_real`.
 
 ## Limitações
 
 - Não guarda memória entre perguntas.
 - Altera a agenda: exige o escopo de escrita.
-- *Acrescente as limitações reais que aparecerem.*
+- Cria o evento na agenda principal e não avisa se ele conflita com outros compromissos.

@@ -5,10 +5,12 @@ Usadas pelo agenda_engine.py (que calcula) e pelos agentes (que exibem).
 Todas as datas são datetime com fuso horário (config.FUSO).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
+
+from destrava.core import config
 
 
 class Bloco(BaseModel):
@@ -45,3 +47,59 @@ class Visualizacao(BaseModel):
     conflitos: list[Conflito]
     total_minutos_livres: float
     total_minutos_ocupados: float
+
+
+class PedidoVisualizacao(BaseModel):
+    """Pedido de entrada do agente de visualização: o período a consultar."""
+
+    inicio: datetime
+    fim: datetime
+
+    @model_validator(mode="after")
+    def _fim_depois_inicio(self):
+        if self.fim < self.inicio:
+            raise ValueError("A data final não deve ser anterior a atual")
+        if self.fim == self.inicio:
+            self.fim = self.inicio + timedelta(days=1)
+        return self
+
+
+class PedidoCriacao(BaseModel):
+    """Pedido de entrada do agente de criação: o evento a criar.
+
+    Datas sem fuso são consideradas no horário de config.FUSO. Não aceita
+    título vazio, início igual ou posterior ao fim, nem evento no passado.
+    """
+
+    titulo: str
+    inicio: datetime
+    fim: datetime
+
+    @field_validator("titulo", mode="before")
+    @classmethod
+    def _titulo_obrigatorio(cls, valor):
+        if not isinstance(valor, str) or not valor.strip():
+            raise ValueError("O título do evento é obrigatório.")
+        return valor.strip()
+
+    @field_validator("inicio", "fim", mode="before")
+    @classmethod
+    def _horario_obrigatorio(cls, valor):
+        if valor is None or valor == "":
+            raise ValueError("Início e fim são obrigatórios.")
+        return valor
+
+    @field_validator("inicio", "fim")
+    @classmethod
+    def _no_fuso_do_projeto(cls, valor: datetime) -> datetime:
+        if valor.tzinfo is None:
+            return valor.replace(tzinfo=config.FUSO)
+        return valor.astimezone(config.FUSO)
+
+    @model_validator(mode="after")
+    def _horarios_coerentes(self):
+        if self.inicio >= self.fim:
+            raise ValueError("O início deve ser anterior ao fim.")
+        if self.inicio <= datetime.now(config.FUSO):
+            raise ValueError("Não é permitido criar eventos no passado.")
+        return self
