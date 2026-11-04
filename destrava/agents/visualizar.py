@@ -6,32 +6,20 @@ Busca os eventos do Google Agenda (somente leitura) e calcula ocupados,
 livres e conflitos com o core/agenda_engine.py.
 
 
-Segue o contrato padrão dos agentes (core/resposta.py):
-
-    inicio -> extrair_periodo(): o LLM transforma o pedido em {"inicio", "fim"}.
-    meio   -> executar(): busca os eventos no Google (somente leitura) e
-              calcula ocupados, livres e conflitos.
-    fim    -> responder(): o LLM explica a agenda em português.
-
-Contrato final (usado pelo supervisor):
-    AgenteVisualizar().executar_por_texto(pergunta) -> RespostaAgente
-    (use .para_dict() ou .para_json() para obter o JSON)
+Contrato final: recebe o pedido do usuário em texto, extrai o período com o
+LLM (PROMPT_EXTRACAO), busca os eventos, calcula a visualização e devolve
+um texto em português com o resumo (PROMPT_RESPOSTA).
 """
 
 
+import json
 from datetime import date, datetime, time, timedelta
 
 
 from destrava.core import config
 from destrava.core.agenda_engine import montar_visualizacao, normalizar_fuso
 from destrava.core.google_client import get_service, listar_eventos
-from destrava.core.llm_client import extrair_json, perguntar
-from destrava.core.resposta import (
-    Periodo,
-    RespostaAgente,
-    ResultadoExecucao,
-    executar_fluxo,
-)
+from destrava.core.llm_client import perguntar
 from destrava.prompts.visualizar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
@@ -83,21 +71,24 @@ def converter_evento_google(evento: dict) -> dict | None:
 
 
 
-def extrair_periodo_detalhado(pergunta: str) -> dict:
+def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
     """Usa o LLM para transformar o pedido em um período de datas.
+
 
     Args:
         pergunta: pedido do usuário em texto livre.
 
-    Returns:
-        Dicionário com ``inicio`` e ``fim`` (datetime no fuso do projeto) e
-        ``periodo_padrao`` (True se o modelo falhou e foi usado o fallback).
 
-    Se o modelo não devolver um JSON válido (ou devolver um período
-    inválido), usa os próximos 7 dias como fallback seguro.
+    Returns:
+        Tupla (inicio, fim) já normalizada no fuso do projeto.
+
+
+    Se o modelo não devolver um JSON válido, usa os próximos 7 dias
+    como fallback seguro.
     """
     hoje = datetime.now(config.FUSO)
     hoje_iso = hoje.date().isoformat()
+
 
     prompt = PROMPT_EXTRACAO.format(
         data_de_hoje=hoje_iso,
@@ -105,28 +96,22 @@ def extrair_periodo_detalhado(pergunta: str) -> dict:
         pergunta_do_usuario=pergunta,
     )
 
+
     resposta = perguntar(prompt)
 
+
     try:
-        dados = extrair_json(resposta)
-        inicio = normalizar_fuso(datetime.fromisoformat(dados["inicio"]))
-        fim = normalizar_fuso(datetime.fromisoformat(dados["fim"]))
-        if fim <= inicio:
-            raise ValueError("Período invertido.")
-        periodo_padrao = False
-    except (KeyError, ValueError, TypeError):
+        dados = json.loads(resposta)
+        inicio = datetime.fromisoformat(dados["inicio"])
+        fim = datetime.fromisoformat(dados["fim"])
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
         # Fallback: se o Gemma escorregar no formato, usa a semana.
         inicio = hoje.replace(hour=0, minute=0, second=0, microsecond=0)
         fim = inicio + timedelta(days=7)
-        periodo_padrao = True
-
-    return {"inicio": inicio, "fim": fim, "periodo_padrao": periodo_padrao}
 
 
-def extrair_periodo(pergunta: str) -> tuple[datetime, datetime]:
-    """Atalho de extrair_periodo_detalhado(): devolve só (inicio, fim)."""
-    periodo = extrair_periodo_detalhado(pergunta)
-    return periodo["inicio"], periodo["fim"]
+    return normalizar_fuso(inicio), normalizar_fuso(fim)
+
 
 
 class AgenteVisualizar:
@@ -181,67 +166,31 @@ class AgenteVisualizar:
         return visualizacao.model_dump(mode="json")
 
 
-    def executar_por_texto(self, pergunta: str) -> RespostaAgente:
-        """Contrato final do agente: recebe texto e devolve o JSON padrão.
+    def executar_por_texto(self, pergunta: str) -> str:
+        """Contrato final do agente: recebe texto e devolve texto.
+
 
         Fluxo:
-            inicio -> extrair_periodo_detalhado(): LLM entende o pedido.
-            meio   -> executar(): busca eventos e calcula livres/conflitos.
-            fim    -> responder(): LLM redige a resposta final.
+            1. extrair_periodo() -> LLM entende o pedido e devolve datas.
+            2. executar() -> busca eventos e calcula livres/conflitos.
+            3. responder() -> LLM redige a resposta final.
+
 
         Args:
             pergunta: pedido do usuário em texto livre.
 
+
         Returns:
-            RespostaAgente com acao "agenda_visualizada" e, em ``dados``,
-            ocupados, livres, conflitos e totais em minutos.
+            Texto curto em português com o resumo da agenda.
         """
-
-        def extrair(texto: str) -> dict:
-            periodo = extrair_periodo_detalhado(texto)
-            return {
-                "inicio": periodo["inicio"].isoformat(),
-                "fim": periodo["fim"].isoformat(),
-                "periodo_padrao": periodo["periodo_padrao"],
-            }
-
-        def executar(extraido: dict) -> ResultadoExecucao:
-            inicio = datetime.fromisoformat(extraido["inicio"])
-            fim = datetime.fromisoformat(extraido["fim"])
-            visualizacao = self.executar(inicio, fim)
-            detalhe = {
-                "total_eventos": sum(
-                    1 for b in visualizacao["ocupados"] if b["tipo"] != "sono"
-                ),
-                "total_livres": len(visualizacao["livres"]),
-                "total_conflitos": len(visualizacao["conflitos"]),
-            }
-            return ResultadoExecucao(
-                dados=visualizacao,
-                periodo=Periodo.de(inicio, fim),
-                detalhe=detalhe,
-            )
-
-        return executar_fluxo(
-            agente="visualizar",
-            acao_sucesso="agenda_visualizada",
-            acao_erro="agenda_nao_visualizada",
-            pergunta=pergunta,
-            extrair=extrair,
-            executar=executar,
-            responder=responder,
-            mensagem_padrao=_mensagem_padrao,
-        )
+        inicio, fim = extrair_periodo(pergunta)
 
 
-def _mensagem_padrao(resultado: dict) -> str:
-    """Mensagem usada se o LLM falhar depois de a agenda já ter sido lida."""
-    eventos = sum(1 for b in resultado["ocupados"] if b["tipo"] != "sono")
-    return (
-        f"Encontrei {eventos} evento(s), {len(resultado['livres'])} horário(s) "
-        f"livre(s) ({resultado['total_minutos_livres']:.0f} min) e "
-        f"{len(resultado['conflitos'])} conflito(s) no período."
-    )
+        resultado = self.executar(inicio, fim)
+
+
+        return responder(pergunta, resultado)
+
 
 
 def _formatar_horario(texto_iso: str) -> str:

@@ -1,70 +1,72 @@
-"""CLI do Destrava: conversa com os agentes da agenda e mostra o JSON.
+"""CLI do Destrava: agente de visualização da agenda.
 
-Todos os agentes devolvem o mesmo formato (ver destrava/core/resposta.py):
-agente, status, acao, mensagem, periodo, dados, fluxo (inicio/meio/fim) e erro.
-
-Uso:
-    python cli.py            # mostra o JSON completo
-    python cli.py --texto    # mostra só a mensagem final
+Fluxo:
+    1. Usuário escolhe o período (hoje, amanhã, semana ou personalizado).
+    2. O agente busca os eventos no Google Calendar (somente leitura).
+    3. O agente calcula ocupados, livres e conflitos.
+    4. O LLM local explica a rotina em português.
 """
 
-import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from destrava.agents.criar import AgenteCriar
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.agents.visualizar import AgenteVisualizar, responder
 
 
-def _formatar(data_iso: str) -> str:
-    return datetime.fromisoformat(data_iso).strftime("%d/%m/%Y às %H:%M")
-
-
-def confirmar_criacao(dados: dict) -> bool:
-    """Mostra o evento interpretado e só cria se o usuário digitar CRIAR."""
-    print("\n=== EVENTO INTERPRETADO ===")
-    print("Título:", dados["titulo"])
-    print("Início:", _formatar(dados["inicio"]))
-    print("Fim:   ", _formatar(dados["fim"]))
-    return input("\nDigite CRIAR para adicionar à agenda real: ").strip() == "CRIAR"
-
-
-AGENTES = {
-    "1": ("visualizar", lambda pedido: AgenteVisualizar().executar_por_texto(pedido)),
-    "2": (
-        "criar",
-        lambda pedido: AgenteCriar().executar_por_texto(
-            pedido, confirmar=confirmar_criacao
-        ),
-    ),
-}
+def parse_date(value: str) -> datetime:
+    """Converte uma string ISO 8601 em datetime."""
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(
+            "Use o formato ISO 8601. Exemplo: 2026-10-28T00:00:00-03:00"
+        ) from error
 
 
 def main():
-    so_texto = "--texto" in sys.argv[1:]
+    periodo = input(
+        "Período [1 = hoje, 2 = amanhã, 3 = semana, 4 = personalizado]: "
+    ).strip()
 
-    print("=== DESTRAVA ===")
-    print("Agentes: 1 = visualizar, 2 = criar. Digite 'sair' para encerrar.\n")
+    agora = datetime.now().astimezone()
 
-    while True:
-        escolha = input("Agente: ").strip().lower()
-        if escolha == "sair":
-            break
-        if escolha not in AGENTES:
-            print("Opção inválida.\n")
-            continue
+    if periodo == "1":
+        inicio = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = inicio + timedelta(days=1)
+    elif periodo == "2":
+        inicio = (agora + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        fim = inicio + timedelta(days=1)
+    elif periodo == "3":
+        inicio = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        fim = inicio + timedelta(days=7)
+    elif periodo == "4":
+        inicio = parse_date(input("Data inicial (ISO 8601): "))
+        fim = parse_date(input("Data final (ISO 8601): "))
+    else:
+        print("Opção inválida.")
+        return
 
-        pedido = input("Você: ").strip()
-        if not pedido:
-            continue
-        if pedido.lower() == "sair":
-            break
+    agente = AgenteVisualizar()
 
-        _, executar = AGENTES[escolha]
-        resposta = executar(pedido)
+    try:
+        resultado = agente.executar(inicio, fim)
+    except Exception as erro:
+        print(f"[erro] {erro}")
+        return
 
-        print()
-        print(resposta.mensagem if so_texto else resposta.para_json())
-        print()
+    pergunta = (
+        "Explique minha rotina e destaque horários livres, "
+        "ocupados e conflitos."
+    )
+
+    try:
+        explicacao = responder(pergunta, resultado)
+    except Exception as erro:
+        print(f"[erro] {erro}")
+        return
+
+    print(explicacao)
 
 
 if __name__ == "__main__":

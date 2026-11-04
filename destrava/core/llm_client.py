@@ -8,21 +8,17 @@ Envia prompts ao Ollama e retorna o texto gerado.
 
 Interface pública:
     perguntar(prompt: str) -> str
-    extrair_json(texto: str) -> dict   (lê o JSON que o modelo devolveu)
 
 Os prompts e as regras de negócio ficam nos agentes,
 não neste módulo.
 """
-
-import json
-import re
 
 import requests
 
 from . import config
 
 
-__all__ = ["perguntar", "extrair_json", "ErroLLM"]
+__all__ = ["perguntar", "ErroLLM"]
 
 
 class ErroLLM(RuntimeError):
@@ -176,39 +172,3 @@ def perguntar(prompt: str) -> str:
         )
 
     return texto.strip()
-
-
-def extrair_json(texto: str) -> dict:
-    """
-    Lê o objeto JSON devolvido pelo modelo.
-
-    Modelos pequenos (como o Gemma 2) às vezes colocam o JSON dentro de um
-    bloco Markdown (```json ... ```) ou escrevem algo antes/depois. Esta
-    função tira isso e devolve só o dicionário.
-
-    Raises:
-        ValueError: Se não houver um objeto JSON válido no texto.
-    """
-    if not isinstance(texto, str):
-        raise ValueError("A resposta do modelo não é texto.")
-
-    limpo = texto.strip()
-    limpo = re.sub(r"^```(?:json)?\s*", "", limpo)
-    limpo = re.sub(r"\s*```$", "", limpo)
-
-    try:
-        dados = json.loads(limpo)
-    except json.JSONDecodeError:
-        inicio = limpo.find("{")
-        fim = limpo.rfind("}")
-        if inicio == -1 or fim <= inicio:
-            raise ValueError("O modelo não retornou um JSON válido.") from None
-        try:
-            dados = json.loads(limpo[inicio:fim + 1])
-        except json.JSONDecodeError as erro:
-            raise ValueError("O modelo não retornou um JSON válido.") from erro
-
-    if not isinstance(dados, dict):
-        raise ValueError("O modelo não retornou um objeto JSON.")
-
-    return dados

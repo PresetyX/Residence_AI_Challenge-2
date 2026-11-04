@@ -14,8 +14,8 @@ O que entra e o que sai, para o supervisor saber como chamá-lo.
 | | |
 |---|---|
 | **Entrada** | texto: a pergunta do usuário (ex.: "estou livre sexta à tarde?") |
-| **Saída** | JSON padrão (ver [contrato.md](contrato.md)): `acao: "agenda_visualizada"`, `periodo` consultado e `dados` com ocupados, livres e conflitos |
-| **Função de entrada** | `AgenteVisualizar().executar_por_texto(pergunta) -> RespostaAgente` (`.para_json()` / `.para_dict()`) |
+| **Saída** | texto em português, curto, só com dados da agenda |
+| **Função de entrada** | `visualizar_agenda(pergunta: str) -> str` *(nome sugerido; confirmar com o grupo)* |
 
 ## Fluxo
 
