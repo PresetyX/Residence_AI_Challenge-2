@@ -12,7 +12,7 @@ Formato (exemplo do agente de criar):
       "agente": "criar",
       "status": "sucesso",                 # "sucesso" | "erro" | "cancelado"
       "acao": "evento_criado",             # o que aconteceu, em snake_case
-      "mensagem": "Pronto! Criei ...",     # texto do LLM para o usuário
+      "mensagem": "Pronto! Criei ...",     # texto montado pelo código (sem LLM)
       "periodo": {                          # período tratado pelo agente
         "inicio": "2026-11-15T14:00:00-03:00",
         "fim": "2026-11-15T15:00:00-03:00",
@@ -30,10 +30,14 @@ Formato (exemplo do agente de criar):
 As 3 etapas do fluxo (iguais para todos os agentes):
     inicio -> o LLM entende o pedido e devolve JSON (PROMPT_EXTRACAO)
     meio   -> o código fala com o Google Calendar
-    fim    -> o LLM escreve a resposta final (PROMPT_RESPOSTA)
+    fim    -> o código monta a mensagem e o JSON final (SEM LLM)
+
+O LLM só é chamado uma vez, para entender o pedido. A resposta é montada pelo
+código a partir dos dados reais, o que deixa a saída mais rápida e sem risco
+de o modelo inventar ou deformar o texto.
 
 Como um agente usa:
-    Implementa três funções (extrair, executar, responder) e chama
+    Implementa três funções (extrair, executar, montar_mensagem) e chama
     ``executar_fluxo(...)``. O tratamento de erros, o preenchimento do fluxo
     e a montagem do JSON ficam todos aqui, para nenhum agente reinventar.
 """
@@ -53,6 +57,9 @@ from destrava.core import config
 
 StatusResposta = Literal["sucesso", "erro", "cancelado"]
 StatusEtapa = Literal["ok", "erro", "cancelado", "pendente"]
+
+# Usada só se a montagem da mensagem falhar depois de a ação já ter sido feita.
+MENSAGEM_GENERICA = "Ação concluída."
 
 
 class Periodo(BaseModel):
@@ -139,12 +146,15 @@ def executar_fluxo(
     pergunta: str,
     extrair: Callable[[str], dict[str, Any]],
     executar: Callable[[dict[str, Any]], ResultadoExecucao],
-    responder: Callable[[str, dict[str, Any]], str],
-    mensagem_padrao: Callable[[dict[str, Any]], str],
+    montar_mensagem: Callable[[ResultadoExecucao], str],
     confirmar: Callable[[dict[str, Any]], bool] | None = None,
     etapa_meio: str = "google_calendar",
 ) -> RespostaAgente:
     """Roda início, meio e fim de um agente e devolve sempre o JSON padrão.
+
+    Só a etapa início usa LLM (para entender o pedido). O fim é código puro:
+    a mensagem e o JSON são montados a partir dos dados reais, sem pedir
+    nenhuma resposta ao modelo.
 
     Args:
         agente: nome do agente ("visualizar", "criar", ...).
@@ -153,8 +163,8 @@ def executar_fluxo(
         pergunta: pedido do usuário em texto livre.
         extrair: etapa início. Recebe a pergunta e devolve os dados extraídos.
         executar: etapa meio. Recebe os dados extraídos e fala com o Google.
-        responder: etapa fim. Recebe a pergunta e ``dados`` e devolve o texto.
-        mensagem_padrao: texto usado se o LLM falhar na etapa fim.
+        montar_mensagem: etapa fim. Recebe o ``ResultadoExecucao`` (dados,
+            período e detalhe) e devolve o texto para o usuário, sem LLM.
         confirmar: opcional. Recebe os dados extraídos; se devolver False,
             o fluxo para com status "cancelado" (nada é alterado na agenda).
         etapa_meio: nome da etapa meio no JSON.
@@ -216,18 +226,18 @@ def executar_fluxo(
     fluxo.meio.status = "ok"
     fluxo.meio.detalhe = resultado.detalhe
 
-    # FIM: o LLM escreve a resposta. Se falhar, a ação já foi feita, então
-    # o status continua "sucesso" e usamos uma mensagem padrão.
+    # FIM: o código monta a mensagem (sem LLM). Se der erro, a ação já foi
+    # feita, então o status continua "sucesso" e usamos uma mensagem genérica.
     erro_fim: ErroInfo | None = None
     try:
-        mensagem = responder(pergunta, resultado.dados).strip()
+        mensagem = montar_mensagem(resultado).strip()
         if not mensagem:
-            raise ValueError("O modelo devolveu uma resposta vazia.")
+            raise ValueError("A mensagem montada está vazia.")
         fluxo.fim.status = "ok"
     except Exception as erro:  # noqa: BLE001
         fluxo.fim.status = "erro"
         erro_fim = ErroInfo(tipo=type(erro).__name__, mensagem=str(erro))
-        mensagem = mensagem_padrao(resultado.dados)
+        mensagem = MENSAGEM_GENERICA
 
     return RespostaAgente(
         agente=agente,

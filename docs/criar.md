@@ -20,13 +20,13 @@ O que entra e o que sai, para o supervisor saber como chamá-lo.
 
 ## Fluxo
 
-Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
+Quem faz cada passo: o LLM só interpreta o pedido; o código fala com a API e monta a resposta.
 
 | # | Passo | Quem |
 |---|---|---|
 | 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
 | 2 | Cria o evento no Google Agenda e confere se o período retornado é o pedido (`conferir_periodo`) | Código |
-| 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
+| 3 | Monta a mensagem final com os dados retornados (`montar_mensagem`) | Código |
 
 *Ajuste os passos se o seu agente tiver mais etapas.*
 
@@ -41,7 +41,7 @@ Os valores compartilhados (fuso, horários) estão em `destrava/core/config.py`.
 - `google_client`: `get_service` com o escopo de **escrita** (`calendar`).
 - `llm_client`: `perguntar(prompt)`.
 - `config`: *liste só o que este agente usa.*
-- `prompts/criar.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
+- `prompts/criar.py`: `PROMPT_EXTRACAO`.
 
 ## Como testar
 

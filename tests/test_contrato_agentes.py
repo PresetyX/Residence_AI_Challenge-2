@@ -13,6 +13,7 @@ import pytest
 from destrava.agents import criar, visualizar
 from destrava.core import config
 from destrava.core.llm_client import extrair_json
+from destrava.core.resposta import MENSAGEM_GENERICA
 
 
 CHAVES_PADRAO = {
@@ -55,7 +56,7 @@ def test_criar_devolve_json_padrao_com_periodo():
         {"titulo": "Reunião", "inicio": inicio.strftime("%Y-%m-%dT%H:%M"),
          "fim": fim.strftime("%Y-%m-%dT%H:%M")}
     )
-    llm = _llm(f"```json\n{extracao}\n```", "Evento Reunião criado!")
+    llm = _llm(f"```json\n{extracao}\n```")
     servico = _servico_que_cria(_evento_google(inicio, fim))
 
     with patch.object(criar, "perguntar", llm), \
@@ -67,7 +68,12 @@ def test_criar_devolve_json_padrao_com_periodo():
     assert dados["agente"] == "criar"
     assert dados["status"] == "sucesso"
     assert dados["acao"] == "evento_criado"
-    assert dados["mensagem"] == "Evento Reunião criado!"
+    # A mensagem é montada pelo código e o LLM só foi chamado na extração.
+    assert dados["mensagem"] == (
+        f"Pronto! Criei \"Reunião\" em {inicio:%d/%m/%Y}, "
+        f"das {inicio:%H:%M} às {fim:%H:%M}."
+    )
+    assert llm.call_count == 1
 
     assert datetime.fromisoformat(dados["periodo"]["inicio"]) == inicio
     assert datetime.fromisoformat(dados["periodo"]["fim"]) == fim
@@ -89,12 +95,13 @@ def test_criar_detecta_periodo_diferente_do_pedido():
     # O Google devolve uma hora a mais no fim.
     servico = _servico_que_cria(_evento_google(inicio, fim + timedelta(hours=1)))
 
-    with patch.object(criar, "perguntar", _llm(extracao, "ok")), \
+    with patch.object(criar, "perguntar", _llm(extracao)), \
          patch.object(criar, "get_service", return_value=servico):
         resposta = criar.AgenteCriar().executar_por_texto("reunião")
 
     assert resposta.status == "sucesso"
     assert resposta.dados["periodo_confere"] is False
+    assert "Atenção" in resposta.mensagem
     assert resposta.fluxo.meio.detalhe["periodo_confere"] is False
 
 
@@ -132,23 +139,45 @@ def test_criar_cancelado_nao_chama_google():
     get_service.assert_not_called()
 
 
-def test_criar_llm_falha_no_fim_mantem_sucesso():
+def test_criar_nao_chama_llm_para_montar_a_resposta():
     inicio, fim = _amanha(14), _amanha(16)
     extracao = json.dumps(
         {"titulo": "Reunião", "inicio": inicio.isoformat(), "fim": fim.isoformat()}
     )
-    llm = MagicMock(side_effect=[extracao, RuntimeError("Ollama fora do ar")])
+    llm = _llm(extracao)
     servico = _servico_que_cria(_evento_google(inicio, fim))
 
     with patch.object(criar, "perguntar", llm), \
          patch.object(criar, "get_service", return_value=servico):
         resposta = criar.AgenteCriar().executar_por_texto("reunião")
 
+    assert llm.call_count == 1  # só a extração; a resposta não usa LLM
     assert resposta.status == "sucesso"
-    assert resposta.fluxo.fim.status == "erro"
-    assert resposta.erro.mensagem == "Ollama fora do ar"
+    assert resposta.fluxo.fim.status == "ok"
+    assert resposta.erro is None
     assert "Reunião" in resposta.mensagem
     assert f"{inicio:%H:%M}" in resposta.mensagem
+
+
+def test_erro_ao_montar_mensagem_mantem_sucesso(monkeypatch):
+    inicio, fim = _amanha(14), _amanha(16)
+    extracao = json.dumps(
+        {"titulo": "Reunião", "inicio": inicio.isoformat(), "fim": fim.isoformat()}
+    )
+    servico = _servico_que_cria(_evento_google(inicio, fim))
+    monkeypatch.setattr(
+        criar, "montar_mensagem", MagicMock(side_effect=KeyError("evento"))
+    )
+
+    with patch.object(criar, "perguntar", _llm(extracao)), \
+         patch.object(criar, "get_service", return_value=servico):
+        resposta = criar.AgenteCriar().executar_por_texto("reunião")
+
+    # A ação já foi feita: continua sucesso, com mensagem genérica.
+    assert resposta.status == "sucesso"
+    assert resposta.fluxo.fim.status == "erro"
+    assert resposta.erro.tipo == "KeyError"
+    assert resposta.mensagem == MENSAGEM_GENERICA
 
 
 # ---------------------------------------------------------- visualizar
@@ -162,7 +191,8 @@ def test_visualizar_devolve_json_padrao_com_periodo():
     )
     eventos = [_evento_google(_amanha(10), _amanha(11))]
 
-    with patch.object(visualizar, "perguntar", _llm(extracao, "Sua agenda...")), \
+    llm = _llm(extracao)
+    with patch.object(visualizar, "perguntar", llm), \
          patch.object(visualizar, "get_service"), \
          patch.object(visualizar, "listar_eventos", return_value=eventos):
         resposta = visualizar.AgenteVisualizar().executar_por_texto("e amanhã?")
@@ -178,10 +208,14 @@ def test_visualizar_devolve_json_padrao_com_periodo():
     assert dados["fluxo"]["inicio"]["detalhe"]["periodo_padrao"] is False
     assert dados["fluxo"]["meio"]["detalhe"]["total_eventos"] == 1
     assert {"ocupados", "livres", "conflitos"} <= set(dados["dados"])
+    assert llm.call_count == 1  # só a extração; a resposta não usa LLM
+    assert dados["fluxo"]["fim"]["status"] == "ok"
+    assert "Horários livres:" in dados["mensagem"]
+    assert "Reunião: " in dados["mensagem"]
 
 
 def test_visualizar_json_invalido_usa_periodo_padrao():
-    with patch.object(visualizar, "perguntar", _llm("não sei", "ok")), \
+    with patch.object(visualizar, "perguntar", _llm("não sei")), \
          patch.object(visualizar, "get_service"), \
          patch.object(visualizar, "listar_eventos", return_value=[]):
         resposta = visualizar.AgenteVisualizar().executar_por_texto("???")
@@ -206,6 +240,61 @@ def test_visualizar_sem_credenciais_vira_erro_no_meio():
     assert resposta.fluxo.meio.status == "erro"
     assert resposta.erro.tipo == "FileNotFoundError"
     assert resposta.periodo is not None  # o período pedido continua no JSON
+
+
+def _resultado_visualizacao(eventos: list[dict], inicio, fim):
+    from destrava.core.resposta import Periodo, ResultadoExecucao
+
+    with patch.object(visualizar, "get_service"), \
+         patch.object(visualizar, "listar_eventos", return_value=eventos):
+        dados = visualizar.AgenteVisualizar().executar(inicio, fim)
+    return ResultadoExecucao(dados=dados, periodo=Periodo.de(inicio, fim))
+
+
+def test_visualizar_mensagem_lista_conflitos_pelo_titulo():
+    inicio, fim = _amanha(0), _amanha(0) + timedelta(days=1)
+    eventos = [
+        {**_evento_google(_amanha(10), _amanha(12)), "id": "a", "summary": "Aula"},
+        {**_evento_google(_amanha(11), _amanha(13)), "id": "b", "summary": "Dentista"},
+    ]
+
+    mensagem = visualizar.montar_mensagem(
+        _resultado_visualizacao(eventos, inicio, fim)
+    )
+
+    assert mensagem.startswith("Avaliei o período de")
+    assert "Horários ocupados:" in mensagem
+    assert f"- Aula: {_amanha(10):%d/%m %H:%M} até {_amanha(12):%d/%m %H:%M}" in mensagem
+    assert "Você possui compromissos conflitantes:" in mensagem
+    assert f"- Aula x Dentista: {_amanha(11):%d/%m %H:%M} até {_amanha(12):%d/%m %H:%M}" in mensagem
+    assert "Evento de dia inteiro:" not in mensagem
+
+
+def test_visualizar_mensagem_dia_inteiro_e_sem_conflitos():
+    inicio, fim = _amanha(0), _amanha(0) + timedelta(days=1)
+    dia = inicio.date()
+    feriado = {
+        "id": "f",
+        "summary": "Feriado",
+        "start": {"date": dia.isoformat()},
+        "end": {"date": (dia + timedelta(days=1)).isoformat()},
+    }
+
+    mensagem = visualizar.montar_mensagem(
+        _resultado_visualizacao([feriado], inicio, fim)
+    )
+
+    assert "Evento de dia inteiro:" in mensagem
+    assert f"- Feriado ({dia:%d/%m})" in mensagem
+    assert "conflitantes" not in mensagem
+
+
+@pytest.mark.parametrize(
+    "minutos, esperado",
+    [(0, "cheia"), (60, "cheia"), (61, "média"), (240, "média"), (241, "livre")],
+)
+def test_classificar_agenda(minutos, esperado):
+    assert visualizar.classificar_agenda(minutos) == esperado
 
 
 # ----------------------------------------------------------- extrair_json

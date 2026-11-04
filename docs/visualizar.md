@@ -19,7 +19,7 @@ O que entra e o que sai, para o supervisor saber como chamá-lo.
 
 ## Fluxo
 
-Quem faz cada passo: o LLM só interpreta e redige, o código busca e calcula.
+Quem faz cada passo: o LLM só interpreta o pedido; o código busca, calcula e monta a resposta.
 
 | # | Passo | Quem |
 |---|---|---|
@@ -27,10 +27,10 @@ Quem faz cada passo: o LLM só interpreta e redige, o código busca e calcula.
 | 2 | Busca os eventos do período no Google Agenda | Código |
 | 3 | Calcula ocupados, livres e conflitos | Código |
 | 4 | Escolhe o que devolver, conforme o pedido | Código |
-| 5 | Escreve a resposta final usando só os dados calculados (`PROMPT_RESPOSTA`) | LLM |
+| 5 | Monta a mensagem final com os dados calculados (`montar_mensagem`) | Código |
 
 ```
-pergunta → [LLM] → período + intenção → [API] → eventos → [código] → livres/ocupados/conflitos → [LLM] → resposta
+pergunta → [LLM] → período + intenção → [API] → eventos → [código] → livres/ocupados/conflitos → [código] → resposta
 ```
 
 ## Regras
@@ -47,7 +47,7 @@ Os valores (horários, duração mínima, fuso) estão em `destrava/core/config.
 - `google_client`: `get_service` com o escopo de **leitura** (`calendar.readonly`) e `listar_eventos`.
 - `llm_client`: `perguntar(prompt)`.
 - `config`: `FUSO`, `HORARIO_ACORDAR`, `HORARIO_DORMIR`, `DURACAO_MINIMA_LIVRE`.
-- `prompts/visualizar.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
+- `prompts/visualizar.py`: `PROMPT_EXTRACAO`.
 
 ## Como testar
 

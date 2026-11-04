@@ -32,7 +32,7 @@ O código do contrato fica em `destrava/core/resposta.py`.
 | `agente` | `visualizar`, `criar`, `editar` ou `excluir` |
 | `status` | `sucesso`, `erro` ou `cancelado` (usuário não confirmou) |
 | `acao` | o que aconteceu, em snake_case (tabela abaixo) |
-| `mensagem` | texto final para o usuário (escrito pelo LLM, ou uma mensagem padrão se o LLM falhar) |
+| `mensagem` | texto final para o usuário, montado pelo código a partir dos dados reais (sem LLM) |
 | `periodo` | período tratado: `inicio`, `fim` (ISO 8601 com fuso) e `duracao_minutos` |
 | `dados` | resultado do agente |
 | `fluxo` | as 3 etapas que todo agente segue, cada uma com `status` `ok`, `erro`, `cancelado` ou `pendente` |
@@ -44,12 +44,12 @@ O código do contrato fica em `destrava/core/resposta.py`.
 |---|---|---|
 | `inicio` | `extracao` | LLM entende o pedido e devolve JSON (`PROMPT_EXTRACAO`) |
 | `meio` | `google_calendar` | código fala com a API do Google |
-| `fim` | `resposta` | LLM escreve a resposta (`PROMPT_RESPOSTA`) |
+| `fim` | `resposta` | código monta a mensagem e o JSON final (**sem LLM**) |
 
 Regras do fluxo:
 
 - Erro no `inicio` ou no `meio` → `status: "erro"` e as etapas seguintes ficam `pendente`.
-- Erro no `fim` (ex.: Ollama caiu) → a ação **já foi feita**, então `status` continua `sucesso`, `fluxo.fim.status` vira `erro` e `mensagem` usa o texto padrão do agente.
+- Erro no `fim` (ex.: falha ao montar o texto) → a ação **já foi feita**, então `status` continua `sucesso`, `fluxo.fim.status` vira `erro` e `mensagem` vira `"Ação concluída."`.
 - O executor nunca levanta exceção: todo erro vira JSON.
 
 ## Ações de cada agente
@@ -64,6 +64,8 @@ Regras do fluxo:
 No agente de criar, `periodo` é lido **da resposta do Google** (não do pedido) e `periodo_confere` diz se ele bate com o início e o fim pedidos.
 
 ## Como um agente novo segue o contrato
+
+O LLM é chamado **uma única vez**, no `inicio`, para entender o pedido. A resposta (`mensagem`) e o JSON são montados pelo código, o que deixa a saída mais rápida e sem risco de o modelo inventar texto.
 
 Cada agente escreve três funções e chama `executar_fluxo`:
 
@@ -93,8 +95,7 @@ class AgenteExcluir:
             pergunta=pergunta,
             extrair=extrair,
             executar=executar,
-            responder=lambda p, dados: ...,      # FIM (LLM)
-            mensagem_padrao=lambda dados: "Evento excluído.",
+            montar_mensagem=lambda r: ...,       # FIM (código, sem LLM): recebe o ResultadoExecucao
             confirmar=confirmar,                 # opcional: pede confirmação antes do meio
         )
 ```

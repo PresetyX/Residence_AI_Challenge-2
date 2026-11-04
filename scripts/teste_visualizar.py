@@ -8,9 +8,9 @@ Uso:
 import sys
 from datetime import date, datetime, timedelta
 
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.agents.visualizar import AgenteVisualizar, montar_mensagem
 from destrava.core import config
-from destrava.agents.visualizar import responder
+from destrava.core.resposta import Periodo, ResultadoExecucao
 
 def formatar(texto_iso: str) -> str:
     """Converte '2026-10-29T09:00:00-03:00' em '29/10 09:00'."""
@@ -51,5 +51,5 @@ for conflito in resultado["conflitos"]:
 print(f"\nTotal livre: {resultado['total_minutos_livres']:.0f} min | "
       f"Total ocupado: {resultado['total_minutos_ocupados']:.0f} min")
 
-print("\n=== RESPOSTA DO GEMMA ===")
-print(responder("Como está minha agenda nesse dia?", resultado))
+print("\n=== MENSAGEM (montada pelo código, sem LLM) ===")
+print(montar_mensagem(ResultadoExecucao(dados=resultado, periodo=Periodo.de(inicio, fim))))

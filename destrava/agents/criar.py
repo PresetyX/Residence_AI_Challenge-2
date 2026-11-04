@@ -8,7 +8,8 @@ Segue o contrato padrão dos agentes (core/resposta.py):
     meio   -> criar_evento_google(): o código cria o evento na API e
               conferir_periodo() checa se o período que voltou do Google é o
               mesmo que foi pedido.
-    fim    -> responder_criacao(): o LLM confirma a criação em português.
+    fim    -> montar_mensagem(): o código escreve a confirmação a partir do
+              evento criado (sem LLM).
 
 Contrato final (usado pelo supervisor):
     AgenteCriar().executar_por_texto(pergunta) -> RespostaAgente
@@ -17,7 +18,6 @@ Contrato final (usado pelo supervisor):
 Escopo OAuth: calendar (escrita).
 """
 
-import json
 from collections.abc import Callable
 from datetime import datetime
 
@@ -30,7 +30,7 @@ from destrava.core.resposta import (
     ResultadoExecucao,
     executar_fluxo,
 )
-from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
+from destrava.prompts.criar import PROMPT_EXTRACAO
 
 
 def validar_dados_evento(dados: dict) -> dict:
@@ -206,45 +206,41 @@ def extrair_dados_evento(pergunta: str) -> dict:
     return validar_dados_evento(dados)
 
 
-def responder_criacao(pergunta: str, evento_criado: dict) -> str:
+def montar_mensagem(resultado: ResultadoExecucao) -> str:
     """
-    Gera uma resposta em português sobre o evento criado.
+    Escreve a confirmação da criação a partir do evento devolvido pelo Google.
+
+    É código puro (sem LLM): usa só os dados reais do evento criado.
 
     Args:
-        pergunta: Solicitação original do usuário.
-        evento_criado: Evento criado (resumo ou o retorno bruto do Google).
+        resultado: resultado da etapa meio, com ``dados["evento"]`` e
+            ``dados["periodo_confere"]``.
 
     Returns:
-        str: Resposta em português confirmando a criação.
+        str: mensagem em português confirmando a criação.
 
     Raises:
-        ValueError: Se não houver confirmação de criação.
-        ErroLLM: Se o modelo não conseguir responder.
+        ValueError: se o evento não tiver a confirmação de criação (id).
     """
-    if not evento_criado.get("id"):
+    evento = resultado.dados["evento"]
+
+    if not evento.get("id"):
         raise ValueError("O evento não possui confirmação de criação.")
 
-    prompt = PROMPT_RESPOSTA.format(
-        pergunta_do_usuario=pergunta,
-        evento_criado=json.dumps(
-            evento_criado,
-            ensure_ascii=False,
-            indent=2
-        )
-    )
-
-    return perguntar(prompt).strip()
-
-
-def _mensagem_padrao(dados: dict) -> str:
-    """Mensagem usada se o LLM falhar depois do evento já criado."""
-    evento = dados["evento"]
     inicio = datetime.fromisoformat(evento["inicio"])
     fim = datetime.fromisoformat(evento["fim"])
-    return (
-        f'Evento "{evento["titulo"]}" criado em {inicio:%d/%m/%Y}, '
+    mensagem = (
+        f'Pronto! Criei "{evento["titulo"]}" em {inicio:%d/%m/%Y}, '
         f"das {inicio:%H:%M} às {fim:%H:%M}."
     )
+
+    if not resultado.dados.get("periodo_confere", True):
+        mensagem += (
+            " Atenção: o período salvo no Google é diferente do pedido, "
+            "confira o evento na agenda."
+        )
+
+    return mensagem
 
 
 class AgenteCriar:
@@ -318,7 +314,6 @@ class AgenteCriar:
             pergunta=pergunta,
             extrair=extrair_dados_evento,
             executar=executar,
-            responder=lambda p, dados: responder_criacao(p, dados["evento"]),
-            mensagem_padrao=_mensagem_padrao,
+            montar_mensagem=montar_mensagem,
             confirmar=confirmar,
         )
