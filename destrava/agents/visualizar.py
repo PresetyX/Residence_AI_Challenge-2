@@ -11,8 +11,7 @@ Segue o contrato padrão dos agentes (core/resposta.py):
     inicio -> extrair_periodo(): o LLM transforma o pedido em {"inicio", "fim"}.
     meio   -> executar(): busca os eventos no Google (somente leitura) e
               calcula ocupados, livres e conflitos.
-    fim    -> montar_mensagem(): o código resume a agenda em português
-              (sem LLM).
+    fim    -> responder(): o LLM explica a agenda em português.
 
 Contrato final (usado pelo supervisor):
     AgenteVisualizar().executar_por_texto(pergunta) -> RespostaAgente
@@ -33,7 +32,7 @@ from destrava.core.resposta import (
     ResultadoExecucao,
     executar_fluxo,
 )
-from destrava.prompts.visualizar import PROMPT_EXTRACAO
+from destrava.prompts.visualizar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
 
@@ -188,7 +187,7 @@ class AgenteVisualizar:
         Fluxo:
             inicio -> extrair_periodo_detalhado(): LLM entende o pedido.
             meio   -> executar(): busca eventos e calcula livres/conflitos.
-            fim    -> montar_mensagem(): o código monta o resumo (sem LLM).
+            fim    -> responder(): LLM redige a resposta final.
 
         Args:
             pergunta: pedido do usuário em texto livre.
@@ -230,8 +229,19 @@ class AgenteVisualizar:
             pergunta=pergunta,
             extrair=extrair,
             executar=executar,
-            montar_mensagem=montar_mensagem,
+            responder=responder,
+            mensagem_padrao=_mensagem_padrao,
         )
+
+
+def _mensagem_padrao(resultado: dict) -> str:
+    """Mensagem usada se o LLM falhar depois de a agenda já ter sido lida."""
+    eventos = sum(1 for b in resultado["ocupados"] if b["tipo"] != "sono")
+    return (
+        f"Encontrei {eventos} evento(s), {len(resultado['livres'])} horário(s) "
+        f"livre(s) ({resultado['total_minutos_livres']:.0f} min) e "
+        f"{len(resultado['conflitos'])} conflito(s) no período."
+    )
 
 
 def _formatar_horario(texto_iso: str) -> str:
@@ -239,8 +249,10 @@ def _formatar_horario(texto_iso: str) -> str:
     return datetime.fromisoformat(texto_iso).strftime("%d/%m %H:%M")
 
 
+
 def _formatar_dia_inteiro(bloco: dict) -> str:
-    """Formata um evento de dia inteiro: '- Feriado (29/10)'.
+    """Formata um evento de dia inteiro: '29/10 (dia inteiro): Feriado'.
+
 
     O fim é exclusivo (00:00 do dia seguinte), por isso o último dia
     mostrado é o anterior a ele.
@@ -249,82 +261,89 @@ def _formatar_dia_inteiro(bloco: dict) -> str:
     ultimo = (datetime.fromisoformat(bloco["fim"]) - timedelta(seconds=1)).date()
     dias = primeiro.strftime("%d/%m")
 
+
     if ultimo != primeiro:
         dias += f" a {ultimo.strftime('%d/%m')}"
 
-    return f"- {bloco['titulo']} ({dias})"
+
+    return f"- {dias} (dia inteiro): {bloco['titulo']}"
 
 
-def classificar_agenda(total_minutos_livres: float) -> str:
-    """Classifica a agenda pelo total de minutos livres: cheia, média ou livre."""
-    if total_minutos_livres <= 60:
-        return "cheia"
-    if total_minutos_livres <= 240:
-        return "média"
-    return "livre"
+
+def formatar_para_prompt(resultado: dict) -> dict[str, str]:
 
 
-def montar_mensagem(resultado: ResultadoExecucao) -> str:
-    """Escreve o resumo da agenda a partir dos dados calculados (sem LLM).
+    
+    """Transforma o resultado do executar() em listas de texto para o prompt.
 
-    Usa só o que o código já calculou: período, livres, ocupados (com o sono),
-    eventos de dia inteiro e conflitos. Nos conflitos, troca o id do evento
-    pelo título. Seções vazias de dia inteiro e de conflitos são omitidas.
+
+    O Gemma entende melhor uma lista legível do que JSON. Nos conflitos,
+    troca o id do evento pelo título, para a resposta citar nomes.
+    Eventos de dia inteiro vão para uma lista separada ("dia_inteiro").
+    """
+    ocupados = [
+        f"- {_formatar_horario(b['inicio'])} a {_formatar_horario(b['fim'])}: {b['titulo']}"
+        for b in resultado["ocupados"]
+        if b["tipo"] != "dia_inteiro"
+    ]
+    dia_inteiro = [
+        _formatar_dia_inteiro(b)
+        for b in resultado["ocupados"]
+        if b["tipo"] == "dia_inteiro"
+    ]
+    livres = [
+        f"- {_formatar_horario(l['inicio'])} a {_formatar_horario(l['fim'])} "
+        f"({l['duracao_minutos']:.0f} min)"
+        for l in resultado["livres"]
+    ]
+
+    def classificar_agenda(total_livres: int) -> str:
+        if total_livres <= 60:
+            return "cheia"
+        if total_livres <= 240:
+            return "média"
+        return "livre"
+
+    titulos = {b["id"]: b["titulo"] for b in resultado["ocupados"]}
+    conflitos = [
+        f"- {' x '.join(titulos.get(i, i) for i in c['ids_eventos'])}: "
+        f"{_formatar_horario(c['inicio_sobreposicao'])} a "
+        f"{_formatar_horario(c['fim_sobreposicao'])}"
+        for c in resultado["conflitos"]
+    ]
+
+    total_livres = resultado["total_minutos_livres"]
+
+    return {
+        "eventos": "\n".join(ocupados) or "- Nenhum",
+        "livres": "\n".join(livres) or "- Nenhum",
+        "conflitos": "\n".join(conflitos) or "- Nenhum",
+        "dia_inteiro": "\n".join(dia_inteiro) or "- Nenhum",
+        "total_livres": f"{total_livres:.0f}",
+        "classificacao": classificar_agenda(total_livres),
+    }
+
+
+
+
+def responder(pergunta: str, resultado: dict) -> str:
+    """Pede ao LLM uma resposta em português usando só os dados calculados.
+
 
     Args:
-        resultado: resultado da etapa meio (``dados`` é o dicionário devolvido
-            por AgenteVisualizar.executar() e ``periodo`` é o período lido).
+        pergunta: o pedido do usuário, em texto.
+        resultado: o dicionário devolvido por AgenteVisualizar.executar().
+
 
     Returns:
-        Texto em português com o resumo da agenda.
+        Texto curto em português explicando a agenda.
+
+
+    Raises:
+        ErroLLM: se o modelo não responder.
     """
-    dados = resultado.dados
-    periodo = resultado.periodo
-    total_livres = dados["total_minutos_livres"]
-
-    linhas: list[str] = []
-
-    if periodo is not None:
-        linhas.append(
-            f"Avaliei o período de {_formatar_horario(periodo.inicio.isoformat())} "
-            f"até {_formatar_horario(periodo.fim.isoformat())}."
-        )
-
-    linhas.append(
-        f"Sua agenda está {classificar_agenda(total_livres)}, "
-        f"com {total_livres:.0f} minutos livres."
+    prompt = PROMPT_RESPOSTA.format(
+        pergunta_do_usuario=pergunta,
+        **formatar_para_prompt(resultado),
     )
-
-    livres = [
-        f"- {_formatar_horario(livre['inicio'])} até {_formatar_horario(livre['fim'])}"
-        for livre in dados["livres"]
-    ]
-    linhas += ["", "Horários livres:", *(livres or ["- Nenhum"])]
-
-    ocupados = [
-        f"- {bloco['titulo']}: {_formatar_horario(bloco['inicio'])} "
-        f"até {_formatar_horario(bloco['fim'])}"
-        for bloco in dados["ocupados"]
-        if bloco["tipo"] != "dia_inteiro"
-    ]
-    linhas += ["", "Horários ocupados:", *(ocupados or ["- Nenhum"])]
-
-    dia_inteiro = [
-        _formatar_dia_inteiro(bloco)
-        for bloco in dados["ocupados"]
-        if bloco["tipo"] == "dia_inteiro"
-    ]
-    if dia_inteiro:
-        linhas += ["", "Evento de dia inteiro:", *dia_inteiro]
-
-    if dados["conflitos"]:
-        titulos = {bloco["id"]: bloco["titulo"] for bloco in dados["ocupados"]}
-        conflitos = [
-            f"- {' x '.join(titulos.get(i, i) for i in conflito['ids_eventos'])}: "
-            f"{_formatar_horario(conflito['inicio_sobreposicao'])} "
-            f"até {_formatar_horario(conflito['fim_sobreposicao'])}"
-            for conflito in dados["conflitos"]
-        ]
-        linhas += ["", "Você possui compromissos conflitantes:", *conflitos]
-
-    return "\n".join(linhas)
+    return perguntar(prompt)

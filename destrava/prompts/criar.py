@@ -1,10 +1,9 @@
 
 """
-Define o prompt de extração do Agente de Criação.
+Define os prompts de extração e resposta do Agente de Criação.
 
-Utilizado por agents/criar.py, que envia o prompt ao
-core/llm_client.py para interpretação pelo modelo. A resposta ao usuário
-não usa LLM: é montada pelo código (agents/criar.py::montar_mensagem).
+Utilizado por agents/criar.py, que envia os prompts ao
+core/llm_client.py para interpretação pelo modelo.
 """
 
 PROMPT_EXTRACAO = """
@@ -77,4 +76,37 @@ Resposta:
 
 Agora interprete o pedido informado e retorne
 somente o JSON.
+"""
+
+
+PROMPT_RESPOSTA = """
+Você é o Agente de Criação do Destrava.
+
+Sua função é comunicar ao usuário o resultado
+da criação de um evento no Google Calendar.
+
+Pedido original:
+{pergunta_do_usuario}
+
+Dados do evento criado:
+{evento_criado}
+
+REGRAS:
+
+1. Utilize somente os dados do evento fornecidos.
+
+2. Não invente títulos, datas ou horários.
+
+3. Responda em português brasileiro.
+
+4. Seja claro, educado e objetivo.
+
+5. Informe o título, a data e os horários
+do evento criado.
+
+6. Não diga que criou outros eventos.
+
+7. Não altere os dados recebidos.
+
+Gere uma resposta curta confirmando o evento.
 """

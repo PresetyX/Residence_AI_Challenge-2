@@ -1,8 +1,8 @@
 # Prompts do agente de excluir  (lógica do agente: destrava/agents/excluir.py)
 #
 # COMO ESTE ARQUIVO FUNCIONA
-# Este arquivo guarda SOMENTE texto de prompt, sem lógica. Cada agente tem uma
-# constante (mesmo nome em todos os agentes, para facilitar a leitura e a revisão):
+# Este arquivo guarda SOMENTE texto de prompt, sem lógica. Cada agente tem duas
+# constantes (mesmos nomes em todos os agentes, para facilitar a leitura e a revisão):
 #
 #   PROMPT_EXTRACAO  (passo 1: o LLM entende o pedido)
 #     - Entrada: a pergunta/pedido do usuário em linguagem natural.
@@ -12,8 +12,11 @@
 #     - Inclua 2 ou 3 exemplos (few-shot): com modelos pequenos como o Gemma 2,
 #       exemplos funcionam melhor do que explicações longas.
 #
-#   A resposta ao usuário NÃO usa LLM: o texto é montado pelo código do agente
-#   (montar_mensagem em agents/excluir.py), para a saída ser mais rápida.
+#   PROMPT_RESPOSTA  (passo 2: o LLM escreve a resposta final)
+#     - Entrada: dados JÁ calculados/obtidos pelo código (o evento excluído pelo código na API).
+#     - Saída esperada: texto curto em português (confirmação do que foi excluído).
+#     - Lacunas: {evento_excluido}, {pergunta_do_usuario}
+#     - Deve mandar usar SOMENTE os dados informados e não inventar nada.
 #
 # REGRAS DO GRUPO
 #   - Os prompts são modelos com lacunas {entre_chaves}; o agente preenche as
