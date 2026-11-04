@@ -1,30 +1,23 @@
 """
 Agente de criação de eventos no Google Calendar.
 
-Segue a mesma lógica do agente de visualização:
+Segue a mesma lógica do agente de visualização: recebe um JSON e devolve um
+JSON, sem usar LLM.
 
-    executar_json(entrada)  -> recebe o evento em JSON, valida com o
-                               PedidoCriacao (core/models.py), cria o evento
-                               e devolve JSON. Não usa LLM.
-    executar_por_texto(...) -> recebe o pedido em texto, extrai o evento com o
-                               LLM (PROMPT_EXTRACAO), cria o evento e responde
-                               em português com o LLM (PROMPT_RESPOSTA).
+    executar_json(entrada) -> recebe o evento em JSON ({"titulo", "inicio",
+                              "fim"}), valida com o PedidoCriacao
+                              (core/models.py), cria o evento no Google
+                              Calendar e devolve o evento criado em JSON.
 
 Chamado pelo Supervisor do Destrava.
 Escopo OAuth: calendar (escrita).
 """
 
-import json
-from collections.abc import Callable
-from datetime import datetime
-
 from pydantic import ValidationError
 
 from destrava.core import config
 from destrava.core.google_client import get_service
-from destrava.core.llm_client import extrair_json, perguntar
 from destrava.core.models import PedidoCriacao
-from destrava.prompts.criar import PROMPT_EXTRACAO, PROMPT_RESPOSTA
 
 
 def validar_dados_evento(dados: dict) -> dict:
@@ -109,63 +102,6 @@ def criar_evento_google(dados: dict, servico) -> dict:
     return resultado
 
 
-def extrair_dados_evento(pergunta: str) -> dict:
-    """
-    Extrai e valida os dados de um evento usando o Gemma 2.
-
-    Args:
-        pergunta: Solicitação do usuário em linguagem natural.
-
-    Returns:
-        dict: Dados do evento validados.
-
-    Raises:
-        ValueError: Se a resposta não for um JSON válido
-            ou se os dados estiverem incompletos.
-    """
-    hoje = datetime.now(config.FUSO).date().isoformat()
-
-    prompt = PROMPT_EXTRACAO.format(
-        data_de_hoje=hoje,
-        fuso=str(config.FUSO),
-        pergunta_do_usuario=pergunta
-    )
-
-    dados = extrair_json(perguntar(prompt))
-
-    return validar_dados_evento(dados)
-
-
-def responder_criacao(pergunta: str, evento_criado: dict) -> str:
-    """
-    Gera uma resposta em português sobre o evento criado.
-
-    Args:
-        pergunta: Solicitação original do usuário.
-        evento_criado: Evento retornado pela API do Google.
-
-    Returns:
-        str: Resposta em português confirmando a criação.
-
-    Raises:
-        ValueError: Se não houver confirmação de criação.
-        ErroLLM: Se o modelo não conseguir responder.
-    """
-    if not evento_criado.get("id"):
-        raise ValueError("O evento não possui confirmação de criação.")
-
-    prompt = PROMPT_RESPOSTA.format(
-        pergunta_do_usuario=pergunta,
-        evento_criado=json.dumps(
-            evento_criado,
-            ensure_ascii=False,
-            indent=2
-        )
-    )
-
-    return perguntar(prompt).strip()
-
-
 class AgenteCriar:
     """Agente responsável por criar eventos no Google Calendar."""
 
@@ -239,38 +175,3 @@ class AgenteCriar:
         servico = get_service([config.ESCOPO_CALENDARIO])
 
         return criar_evento_google(dados, servico)
-
-    def executar_por_texto(
-        self,
-        pergunta: str,
-        confirmar: Callable[[dict], bool] | None = None,
-    ) -> str:
-        """Recebe o pedido em texto e devolve texto.
-
-        Fluxo:
-            1. O LLM transforma o pedido em título, início e fim.
-            2. Se houver ``confirmar``, pede a confirmação antes de criar.
-            3. Código cria o evento (sem LLM).
-            4. O LLM escreve a confirmação em português.
-
-        Args:
-            pergunta: pedido do usuário em texto livre.
-            confirmar: opcional. Recebe os dados extraídos e devolve True
-                para criar ou False para cancelar (ex.: pedir "CRIAR" no
-                terminal). Sem ele, o evento é criado direto.
-
-        Returns:
-            Texto curto em português confirmando a criação (ou o aviso de
-            que foi cancelada).
-
-        Raises:
-            ValueError: Se o pedido não tiver título, início e fim válidos.
-        """
-        dados = extrair_dados_evento(pergunta)
-
-        if confirmar is not None and not confirmar(dados):
-            return "Criação cancelada. Nada foi alterado na agenda."
-
-        evento_criado = self.executar(dados)
-
-        return responder_criacao(pergunta, evento_criado)

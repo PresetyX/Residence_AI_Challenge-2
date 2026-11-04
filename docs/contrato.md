@@ -2,7 +2,7 @@
 
 Os agentes **recebem JSON e devolvem JSON, sem usar LLM**. Quem interpreta o pedido do usuário (texto livre) é o Supervisor; o agente só valida o que recebeu, fala com o Google Calendar e responde.
 
-Cada agente também tem `executar_por_texto(...)`, um caminho opcional em que o LLM entende o pedido e escreve a resposta. O contrato abaixo vale para o caminho em JSON: `executar_json(entrada)`.
+A função de entrada de cada agente é `executar_json(entrada)`.
 
 ## Entrada
 

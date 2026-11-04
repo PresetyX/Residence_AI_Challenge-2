@@ -11,7 +11,7 @@ Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando local
 ## Pré-requisitos
 
 - Python 3.10 ou superior
-- [Ollama](https://ollama.com/download) instalado (só é usado nos caminhos em texto; os caminhos em JSON não usam LLM)
+- [Ollama](https://ollama.com/download) instalado (por enquanto nenhum agente usa LLM; os agentes de visualizar e criar recebem e devolvem JSON)
 - Conta Google (para o Google Agenda)
 
 ## Instalação
