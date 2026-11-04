@@ -56,6 +56,8 @@ class PedidoVisualizacao(BaseModel):
     def _fim_depois_inicio(self):
         if (self.inicio.tzinfo is None) != (self.fim.tzinfo is None):
             raise ValueError("inicio e fim devem ter fuso, ou os dois não ter.")
+        if self.fim < self.inicio:
+            raise ValueError("A data final não pode ser anterior à inicial.")
         if self.fim == self.inicio:
             self.fim = self.inicio + timedelta(days=1)
         return self
