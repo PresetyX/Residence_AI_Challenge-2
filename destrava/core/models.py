@@ -6,9 +6,11 @@ Todas as datas são datetime com fuso horário (config.FUSO).
 """
 
 from datetime import datetime, timedelta
-from pydantic import BaseModel, field_validator, model_validator
-from destrava.core import config
 from typing import Any, Literal
+
+from pydantic import BaseModel, field_validator, model_validator
+
+from destrava.core import config
 
 class Bloco(BaseModel):
     """Um intervalo de tempo da agenda: um evento, um evento de dia inteiro ou o sono."""
@@ -102,6 +104,8 @@ class PedidoCriacao(BaseModel):
         if self.inicio <= datetime.now(config.FUSO):
             raise ValueError("Não é permitido criar eventos no passado.")
         return self
+
+    
 class Periodo(BaseModel):
     """Período tratado pelo agente."""
     inicio: datetime
