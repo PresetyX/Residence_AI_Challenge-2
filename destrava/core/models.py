@@ -6,12 +6,11 @@ Todas as datas são datetime com fuso horário (config.FUSO).
 """
 
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator, model_validator
 
 from destrava.core import config
-
 
 class Bloco(BaseModel):
     """Um intervalo de tempo da agenda: um evento, um evento de dia inteiro ou o sono."""
@@ -57,8 +56,10 @@ class PedidoVisualizacao(BaseModel):
 
     @model_validator(mode="after")
     def _fim_depois_inicio(self):
+        if (self.inicio.tzinfo is None) != (self.fim.tzinfo is None):
+            raise ValueError("inicio e fim devem ter fuso, ou os dois não ter.")
         if self.fim < self.inicio:
-            raise ValueError("A data final não deve ser anterior a atual")
+            raise ValueError("A data final não pode ser anterior à inicial.")
         if self.fim == self.inicio:
             self.fim = self.inicio + timedelta(days=1)
         return self
@@ -103,3 +104,46 @@ class PedidoCriacao(BaseModel):
         if self.inicio <= datetime.now(config.FUSO):
             raise ValueError("Não é permitido criar eventos no passado.")
         return self
+
+
+class Periodo(BaseModel):
+    """Período tratado pelo agente."""
+
+    inicio: datetime
+    fim: datetime
+    duracao_minutos: float
+
+
+class Etapa(BaseModel):
+    """Uma etapa do fluxo do agente."""
+
+    etapa: str
+    status: Literal["ok", "erro", "pendente"] = "pendente"
+    detalhe: Any = None
+
+
+class Fluxo(BaseModel):
+    """As três etapas do fluxo de um agente: início, meio e fim."""
+
+    inicio: Etapa
+    meio: Etapa
+    fim: Etapa
+
+
+class ErroInfo(BaseModel):
+    """Erro que interrompeu o fluxo."""
+
+    tipo: str
+    mensagem: str
+
+
+class RespostaAgente(BaseModel):
+    """Resposta JSON padrão dos agentes de visualizar e criar."""
+
+    status: Literal["sucesso", "erro"]
+    acao: str
+    periodo: Periodo | None = None
+    dados: dict[str, Any] | None = None
+    fluxo: Fluxo
+    erro: ErroInfo | None = None
+
