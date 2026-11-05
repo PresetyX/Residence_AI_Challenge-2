@@ -13,11 +13,20 @@ Chamado pelo Supervisor do Destrava.
 Escopo OAuth: calendar (escrita).
 """
 
+from datetime import datetime
+
 from pydantic import ValidationError
 
 from destrava.core import config
 from destrava.core.google_client import get_service
-from destrava.core.models import PedidoCriacao
+from destrava.core.models import (
+    ErroInfo,
+    Etapa,
+    Fluxo,
+    PedidoCriacao,
+    Periodo,
+    RespostaAgente,
+)
 
 
 def validar_dados_evento(dados: dict) -> dict:
@@ -102,6 +111,18 @@ def criar_evento_google(dados: dict, servico) -> dict:
     return resultado
 
 
+def _periodo_confere(
+    pedido: PedidoCriacao, inicio_google: str | None, fim_google: str | None
+) -> bool:
+    """Diz se o início e o fim devolvidos pelo Google são os que foram pedidos."""
+    if not inicio_google or not fim_google:
+        return False
+
+    inicio = datetime.fromisoformat(inicio_google.replace("Z", "+00:00"))
+    fim = datetime.fromisoformat(fim_google.replace("Z", "+00:00"))
+    return inicio == pedido.inicio and fim == pedido.fim
+
+
 class AgenteCriar:
     """Agente responsável por criar eventos no Google Calendar."""
 
@@ -113,46 +134,99 @@ class AgenteCriar:
                 (ISO 8601). Datas sem fuso valem no horário de config.FUSO.
 
         Returns:
-            {"evento": {"id", "titulo", "inicio", "fim", "link"}} se o evento
-            foi criado, ou {"erro": "Pedido inválido", "detalhes": [...]}
-            se o pedido não passar na validação (nada é criado).
-
-        Raises:
-            RuntimeError: Se a API não retornar o ID do evento.
-            HttpError: Se a API do Google retornar um erro.
+            Dicionário com status, acao, periodo, dados, fluxo e erro (o mesmo
+            formato do agente de visualização).
+            - Sucesso: status "sucesso", periodo do evento e dados com o
+              "evento" criado (id, titulo, inicio, fim e link), com as três
+              etapas do fluxo "ok".
+            - Erro: status "erro" e erro {tipo, mensagem}. A etapa que falhou
+              fica "erro" no fluxo e as seguintes ficam "pendente". Pedido
+              inválido não chama o Google, e nada é criado.
 
         Escopo OAuth: calendar (config.ESCOPO_CALENDARIO).
         """
+        # 0. Cria o fluxo com as 3 etapas ainda pendentes.
+        fluxo = Fluxo(
+            inicio=Etapa(etapa="validacao"),
+            meio=Etapa(etapa="google_calendar"),
+            fim=Etapa(etapa="conferencia"),
+        )
+
+        # 1. INÍCIO: valida o pedido.
         try:
             if isinstance(entrada, str):
                 pedido = PedidoCriacao.model_validate_json(entrada)
             else:
                 pedido = PedidoCriacao.model_validate(entrada)
         except ValidationError as erro:
-            return {
-                "erro": "Pedido inválido",
-                "detalhes": erro.errors(include_url=False, include_context=False),
-            }
+            fluxo.inicio.status = "erro"
+            return RespostaAgente(
+                status="erro",
+                acao="evento_nao_criado",
+                fluxo=fluxo,
+                erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
+            ).model_dump(mode="json")
 
-        criado = self.executar(
-            {
-                "titulo": pedido.titulo,
-                "inicio": pedido.inicio.isoformat(),
-                "fim": pedido.fim.isoformat(),
-            }
+        fluxo.inicio.status = "ok"
+        fluxo.inicio.detalhe = {
+            "titulo": pedido.titulo,
+            "inicio": pedido.inicio.isoformat(),
+            "fim": pedido.fim.isoformat(),
+        }
+
+        # 2. Período do evento (vale para sucesso e para erro no meio).
+        periodo = Periodo(
+            inicio=pedido.inicio,
+            fim=pedido.fim,
+            duracao_minutos=(pedido.fim - pedido.inicio).total_seconds() / 60,
         )
 
-        return {
-            "evento": {
-                "id": criado["id"],
-                "titulo": criado.get("summary", pedido.titulo),
-                "inicio": criado.get("start", {}).get(
-                    "dateTime", pedido.inicio.isoformat()
-                ),
-                "fim": criado.get("end", {}).get("dateTime", pedido.fim.isoformat()),
-                "link": criado.get("htmlLink"),
-            }
+        # 3. MEIO: cria o evento no Google Calendar.
+        try:
+            criado = self.executar(
+                {
+                    "titulo": pedido.titulo,
+                    "inicio": pedido.inicio.isoformat(),
+                    "fim": pedido.fim.isoformat(),
+                }
+            )
+        except Exception as erro:
+            fluxo.meio.status = "erro"
+            return RespostaAgente(
+                status="erro",
+                acao="evento_nao_criado",
+                periodo=periodo,
+                fluxo=fluxo,
+                erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
+            ).model_dump(mode="json")
+
+        fluxo.meio.status = "ok"
+        fluxo.meio.detalhe = {"evento_id": criado["id"]}
+
+        # 4. FIM: confere se o período devolvido pelo Google é o que foi pedido.
+        inicio_google = criado.get("start", {}).get("dateTime")
+        fim_google = criado.get("end", {}).get("dateTime")
+        fluxo.fim.status = "ok"
+        fluxo.fim.detalhe = {
+            "periodo_confere": _periodo_confere(pedido, inicio_google, fim_google)
         }
+
+        # 5. Sucesso.
+        return RespostaAgente(
+            status="sucesso",
+            acao="evento_criado",
+            periodo=periodo,
+            dados={
+                "evento": {
+                    "id": criado["id"],
+                    "titulo": criado.get("summary", pedido.titulo),
+                    "inicio": inicio_google or pedido.inicio.isoformat(),
+                    "fim": fim_google or pedido.fim.isoformat(),
+                    "link": criado.get("htmlLink"),
+                }
+            },
+            fluxo=fluxo,
+        ).model_dump(mode="json")
 
     def executar(self, dados: dict) -> dict:
         """

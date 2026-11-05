@@ -18,10 +18,10 @@ from destrava.core.google_client import get_service, listar_eventos
 from destrava.core.models import (
     ErroInfo,
     Etapa,
-    FluxoVisualizacao,
+    Fluxo,
     PedidoVisualizacao,
     Periodo,
-    RespostaVisualizacao,
+    RespostaAgente,
 )
 
 
@@ -87,7 +87,7 @@ class AgenteVisualizar:
               fica "erro" no fluxo e as seguintes ficam "pendente".
         """
         # 0. Cria o fluxo com as 3 etapas ainda pendentes.
-        fluxo = FluxoVisualizacao(
+        fluxo = Fluxo(
             inicio=Etapa(etapa="validacao"),
             meio=Etapa(etapa="google_calendar"),
             fim=Etapa(etapa="calculo")
@@ -100,7 +100,7 @@ class AgenteVisualizar:
                 pedido = PedidoVisualizacao.model_validate(entrada)
         except ValidationError as erro:
             fluxo.inicio.status = "erro"
-            return RespostaVisualizacao(
+            return RespostaAgente(
                 status="erro", acao="agenda_nao_visualizada", fluxo=fluxo,
                 erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
             ).model_dump(mode="json")
@@ -118,7 +118,7 @@ class AgenteVisualizar:
             resultado = self.executar(inicio, fim)
         except Exception as erro:
             fluxo.meio.status = "erro"
-            return RespostaVisualizacao(
+            return RespostaAgente(
                 status="erro", acao="agenda_nao_visualizada", periodo=periodo, fluxo=fluxo,
                 erro=ErroInfo(tipo=type(erro).__name__, mensagem=str(erro)),
             ).model_dump(mode="json")
@@ -127,7 +127,7 @@ class AgenteVisualizar:
         fluxo.fim.status = "ok"
 
         # 4. Sucesso. Por enquanto só livres; ocupados e conflitos ficam de fora.
-        return RespostaVisualizacao(
+        return RespostaAgente(
             status="sucesso",
             acao="agenda_visualizada",
             periodo=periodo,

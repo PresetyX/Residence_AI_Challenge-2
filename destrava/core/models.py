@@ -105,9 +105,10 @@ class PedidoCriacao(BaseModel):
             raise ValueError("Não é permitido criar eventos no passado.")
         return self
 
-    
+
 class Periodo(BaseModel):
     """Período tratado pelo agente."""
+
     inicio: datetime
     fim: datetime
     duracao_minutos: float
@@ -115,13 +116,15 @@ class Periodo(BaseModel):
 
 class Etapa(BaseModel):
     """Uma etapa do fluxo do agente."""
+
     etapa: str
     status: Literal["ok", "erro", "pendente"] = "pendente"
     detalhe: Any = None
 
 
-class FluxoVisualizacao(BaseModel):
-    """As três etapas do agente de visualização."""
+class Fluxo(BaseModel):
+    """As três etapas do fluxo de um agente: início, meio e fim."""
+
     inicio: Etapa
     meio: Etapa
     fim: Etapa
@@ -129,16 +132,18 @@ class FluxoVisualizacao(BaseModel):
 
 class ErroInfo(BaseModel):
     """Erro que interrompeu o fluxo."""
+
     tipo: str
     mensagem: str
 
 
-class RespostaVisualizacao(BaseModel):
-    """Resposta do agente de visualizacao."""
+class RespostaAgente(BaseModel):
+    """Resposta JSON padrão dos agentes de visualizar e criar."""
+
     status: Literal["sucesso", "erro"]
     acao: str
     periodo: Periodo | None = None
     dados: dict[str, Any] | None = None
-    fluxo: FluxoVisualizacao
+    fluxo: Fluxo
     erro: ErroInfo | None = None
 
