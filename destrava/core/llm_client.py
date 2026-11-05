@@ -8,6 +8,7 @@ Envia prompts ao Ollama e retorna o texto gerado.
 Interface pública:
     perguntar(prompt: str) -> str
     extrair_json(texto: str) -> dict   (lê o JSON que o modelo devolveu)
+    gerar_embeddings(textos: list[str]) -> list[list[float]]   (usado pelo RAG)
 
 Os prompts e as regras de negócio ficam nos agentes,
 não neste módulo.
@@ -21,7 +22,7 @@ import requests
 from . import config
 
 
-__all__ = ["perguntar", "extrair_json", "ErroLLM"]
+__all__ = ["perguntar", "extrair_json", "gerar_embeddings", "ErroLLM"]
 
 
 # Erro próprio do projeto: os agentes tratam só este, seja qual for a falha.
@@ -173,6 +174,95 @@ def perguntar(prompt: str) -> str:
         )
 
     return texto.strip()
+
+
+def gerar_embeddings(textos: list[str]) -> list[list[float]]:
+    """
+    Gera um vetor (embedding) para cada texto, com o modelo de embeddings
+    definido em config.py (MODELO_EMBEDDING), via Ollama.
+
+    Args:
+        textos: Textos a transformar em vetores (não pode haver texto vazio).
+
+    Returns:
+        Uma lista de vetores, na mesma ordem dos textos recebidos.
+
+    Raises:
+        TypeError: Se textos não for uma lista de strings.
+        ValueError: Se a lista ou algum texto estiver vazio.
+        ErroLLM: Se a configuração for inválida ou a chamada falhar.
+    """
+    # 1. Valida a entrada.
+    if not isinstance(textos, list) or not all(isinstance(t, str) for t in textos):
+        raise TypeError("textos deve ser uma lista de strings.")
+
+    if not textos or any(not t.strip() for t in textos):
+        raise ValueError("A lista de textos e cada texto não podem estar vazios.")
+
+    # 2. Lê e valida as configurações (mesmas regras do perguntar).
+    modelo = config.MODELO_EMBEDDING
+    base_url = config.OLLAMA_URL
+    timeout = config.TIMEOUT_LLM
+
+    if not isinstance(modelo, str) or not modelo.strip():
+        raise ErroLLM("MODELO_EMBEDDING deve ser uma string não vazia em config.py.")
+
+    if not isinstance(base_url, str) or not base_url.strip():
+        raise ErroLLM("OLLAMA_URL deve ser uma URL não vazia em config.py.")
+
+    if (
+        isinstance(timeout, bool)
+        or not isinstance(timeout, (int, float))
+        or timeout <= 0
+    ):
+        raise ErroLLM("TIMEOUT_LLM deve ser um número positivo em config.py.")
+
+    # 3. Envia todos os textos de uma vez ao endpoint /api/embed.
+    url = f"{base_url.strip().rstrip('/')}/api/embed"
+    payload = {"model": modelo.strip(), "input": textos}
+
+    try:
+        resposta = requests.post(url, json=payload, timeout=(5, timeout))
+    except requests.exceptions.Timeout as exc:
+        raise ErroLLM("O Ollama excedeu o tempo limite ao gerar embeddings.") from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise ErroLLM(
+            f"Não foi possível conectar ao Ollama em {base_url}. "
+            "Verifique se o serviço está em execução."
+        ) from exc
+    except requests.exceptions.RequestException as exc:
+        raise ErroLLM(f"Falha ao enviar a requisição ao Ollama: {exc}") from exc
+
+    # 4. Confere o status. 404 costuma ser modelo de embeddings não instalado.
+    try:
+        resposta.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        mensagem = f"O Ollama retornou HTTP {resposta.status_code} ao gerar embeddings."
+
+        if resposta.status_code == 404:
+            mensagem += (
+                f" Verifique se o modelo '{modelo.strip()}' está instalado "
+                f"(ollama pull {modelo.strip()})."
+            )
+
+        raise ErroLLM(mensagem) from exc
+
+    # 5. Lê os vetores e confere se vieram todos.
+    try:
+        dados = resposta.json()
+    except ValueError as exc:
+        raise ErroLLM("O Ollama retornou uma resposta que não é um JSON válido.") from exc
+
+    vetores = dados.get("embeddings") if isinstance(dados, dict) else None
+
+    if (
+        not isinstance(vetores, list)
+        or len(vetores) != len(textos)
+        or not all(isinstance(v, list) and v for v in vetores)
+    ):
+        raise ErroLLM("O Ollama não devolveu um embedding para cada texto.")
+
+    return vetores
 
 
 def extrair_json(texto: str) -> dict:

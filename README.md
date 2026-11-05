@@ -7,6 +7,7 @@ Agentes que trabalham com o Google Agenda. Hoje existem **dois agentes prontos, 
 | Visualização | Pronto: recebe um período em JSON e devolve os horários livres (somente leitura) |
 | Criar | Pronto: recebe título, início e fim em JSON e cria o evento |
 | Editar, excluir | Em desenvolvimento |
+| RAG (Supervisor e Planejador) | Máquina pronta (chunking, embeddings, banco vetorial, busca, prompt e geração). As bases de conhecimento estão vazias, aguardando conteúdo (ver [`docs/rag.md`](docs/rag.md)) |
 
 O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](docs/contrato.md).
 
@@ -79,6 +80,7 @@ Use `python -m` (e não `python scripts/arquivo.py`), senão aparece `ModuleNotF
 | `python -m scripts.teste_visualizar 2026-11-04` | O mesmo, para um dia específico (AAAA-MM-DD) | Real (leitura) |
 | `python -m scripts.teste_criar` | Cria um evento com um serviço simulado e mostra o que seria enviado à API | Simulado |
 | `python -m scripts.teste_criar_real` | Pede um JSON, mostra o evento e só cria na agenda real se você digitar `CRIAR` | Real (escrita) |
+| `python -m scripts.teste_rag supervisor "sua pergunta"` | Mostra os trechos (e, com `--prompt` ou `--responder`, o prompt e a resposta) que o RAG devolve para a pergunta | Não usa |
 
 ### 3. Testes automáticos
 
@@ -86,7 +88,17 @@ Use `python -m` (e não `python scripts/arquivo.py`), senão aparece `ModuleNotF
 python -m pytest tests/
 ```
 
-Os testes simulam o Google, então não precisam de `credentials.json` nem de internet.
+Os testes simulam o Google e o Ollama, então não precisam de `credentials.json`, de internet nem do Ollama.
+
+## Ollama (opcional, para o RAG)
+
+O RAG funciona sem o Ollama, só com busca por palavras-chave. Para a busca completa (palavras-chave + significado), com o Ollama instalado e rodando:
+
+```
+ollama pull nomic-embed-text
+```
+
+O nome do modelo de embeddings fica em `destrava/core/config.py` (`MODELO_EMBEDDING`). Os agentes de visualizar e criar não usam o Ollama.
 
 ## Problemas comuns
 
@@ -104,6 +116,7 @@ Os testes simulam o Google, então não precisam de `credentials.json` nem de in
 destrava/
 ├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
 ├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
+├── rag/       RAG: chunker, banco vetorial, índice, recuperador; as bases de conhecimento ficam em rag/conhecimento/
 └── prompts/   prompts dos agentes ainda em desenvolvimento (editar, excluir)
 docs/          documentação técnica de cada agente e contrato JSON
 scripts/       scripts de teste manual
@@ -123,4 +136,4 @@ python -c "from destrava.core import config; print(config.FUSO)"
 
 ## Documentação
 
-A documentação técnica de cada agente fica na pasta `docs/`. O contrato JSON dos agentes está em `docs/contrato.md`.
+A documentação técnica de cada agente fica na pasta `docs/`. O contrato JSON dos agentes está em `docs/contrato.md` e o RAG em `docs/rag.md`.

@@ -11,3 +11,6 @@ token*.json
 # Cache do Python
 __pycache__/
 *.pyc
+
+# RAG: cópia local dos índices
+.rag_indices/
