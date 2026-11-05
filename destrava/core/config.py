@@ -24,6 +24,26 @@ MODELO = "gemma2:2b"            # depois: "gemma2:9b"
 OLLAMA_URL = "http://localhost:11434"
 TIMEOUT_LLM = 120
 
+# RAG DO SUPERVISOR (usado por destrava/rag/)
+# Modelo de embeddings do Ollama (instale com: ollama pull nomic-embed-text).
+# Se não estiver disponível, o RAG busca só por palavras-chave (BM25).
+MODELO_EMBEDDING = "nomic-embed-text"
+# O nomic-embed-text rende mais quando o texto indexado e a pergunta recebem
+# estes prefixos. Para um modelo de embeddings sem prefixo, deixe os dois "".
+RAG_PREFIXO_DOCUMENTO = "search_document: "
+RAG_PREFIXO_CONSULTA = "search_query: "
+# Arquivos indexados, relativos à raiz do projeto. Só entram os que descrevem
+# agentes prontos: os docs de editar e excluir ainda são modelos em branco.
+RAG_FONTES = (
+    "docs/contrato.md",
+    "docs/visualizar.md",
+    "docs/criar.md",
+    "destrava/rag/conhecimento/roteamento.md",
+)
+RAG_TAMANHO_MAX_TRECHO = 1200   # caracteres por trecho (seções maiores são divididas)
+RAG_TOP_K = 4                   # quantos trechos devolver por busca
+RAG_SIMILARIDADE_MINIMA = 0.30  # cosseno mínimo para um trecho entrar pela busca por embeddings
+
 # ROTINA
 FUSO = ZoneInfo("America/Sao_Paulo")
 HORARIO_ACORDAR = time(6, 0)
@@ -44,6 +64,10 @@ ARQUIVO_TOKEN_SOMENTE_LEITURA = "token_readonly.json"
 ARQUIVO_TOKEN_CALENDARIO = "token_calendar.json"
 RAIZ_PROJETO = Path(__file__).resolve().parents[2]
 ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / NOME_ARQUIVO_CREDENCIAIS
+
+# RAG: cópia local do índice (já pronto, com embeddings), reconstruída sozinha
+# quando as fontes ou os parâmetros mudam. Está no .gitignore.
+ARQUIVO_INDICE_RAG = RAIZ_PROJETO / ".rag_indice.json"
 
 
 

@@ -11,3 +11,7 @@ token*.json
 # Cache do Python
 __pycache__/
 *.pyc
+
+# RAG do Supervisor: cópia local do índice
+.rag_indice.json
+.rag_indice.json.tmp
