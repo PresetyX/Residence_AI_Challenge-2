@@ -1,6 +1,6 @@
 # Destrava (Residence_AI_Challenge-2)
 
-Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando localmente com o Ollama.
+Agentes que trabalham com o Google Agenda. Hoje existem **dois agentes prontos, o de visualização e o de criação**. Eles serão chamados pelo **Supervisor**: cada um recebe um JSON e devolve um JSON, sem usar LLM.
 
 | Agente | Situação |
 |---|---|
@@ -8,10 +8,11 @@ Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando local
 | Criar | Pronto: recebe título, início e fim em JSON e cria o evento |
 | Editar, excluir | Em desenvolvimento |
 
+O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](docs/contrato.md).
+
 ## Pré-requisitos
 
 - Python 3.10 ou superior
-- [Ollama](https://ollama.com/download) instalado (por enquanto nenhum agente usa LLM; os agentes de visualizar e criar recebem e devolvem JSON)
 - Conta Google (para o Google Agenda)
 
 ## Instalação
@@ -31,12 +32,6 @@ Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando local
    pip install -r requirements.txt
    ```
 
-3. Baixe o modelo no Ollama (o nome do modelo usado está em `destrava/core/config.py`):
-
-   ```
-   ollama pull gemma2:2b
-   ```
-
 ## Credenciais do Google
 
 1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto e ative a **Google Calendar API**.
@@ -46,23 +41,19 @@ Agentes que trabalham com o Google Agenda, usando o modelo Gemma 2 rodando local
 
 > `credentials.json` e `token*.json` estão no `.gitignore`. **Nunca** faça commit deles.
 
-## Como rodar os agentes
+## Como rodar
 
 Todos os comandos são executados **na raiz do projeto**, com o ambiente virtual ativo.
 
-Os agentes **recebem JSON e devolvem JSON, sem usar LLM**. O formato está em [`docs/contrato.md`](docs/contrato.md).
+**Na primeira execução com o Google**, o navegador abre para você autorizar o acesso à agenda (leitura para o visualizar, escrita para o criar). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
 
-### 1. Inicie o CLI
+### 1. CLI: os dois agentes (Google real)
 
 ```
 python cli.py
 ```
 
-Escolha o agente (`1` = visualizar, `2` = criar) e cole um JSON. Para encerrar, digite `sair`.
-
-**Na primeira execução**, o navegador abre para você autorizar o acesso ao Google Agenda (leitura para o visualizar, escrita para o criar). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
-
-### 2. Exemplos de JSON
+Escolha o agente (`1` = visualizar, `2` = criar), cole um JSON e veja o JSON de resposta. Para encerrar, digite `sair`.
 
 Visualizar (devolve os horários livres; se `fim` for igual a `inicio`, o período vira o dia inteiro):
 
@@ -70,66 +61,65 @@ Visualizar (devolve os horários livres; se `fim` for igual a `inicio`, o perío
 {"inicio": "2026-11-04T00:00:00-03:00", "fim": "2026-11-05T00:00:00-03:00"}
 ```
 
-Criar (devolve o evento criado; datas sem fuso valem no horário de `config.FUSO`):
+Criar (**cria o evento de verdade** na agenda; datas sem fuso valem no horário de `config.FUSO`):
 
 ```
 {"titulo": "Dentista", "inicio": "2026-11-15T15:00", "fim": "2026-11-15T16:00"}
 ```
 
-Pedido inválido (título vazio, início depois do fim, evento no passado...) devolve `{"erro": "Pedido inválido", "detalhes": [...]}` e não altera a agenda.
+Os dois agentes devolvem o mesmo formato (`status`, `acao`, `periodo`, `dados`, `fluxo`, `erro`). Pedido inválido ou falha no Google não levanta exceção: volta como `"status": "erro"` e não altera a agenda.
 
-## Teste rápido sem o CLI
+### 2. Scripts de teste manual
 
-Mostra, para um dia, os horários ocupados, livres e conflitos calculados:
+Use `python -m` (e não `python scripts/arquivo.py`), senão aparece `ModuleNotFoundError: destrava`.
 
-```
-python -m scripts.teste_visualizar              # dia de amanhã
-python -m scripts.teste_visualizar 2026-10-29   # um dia específico (AAAA-MM-DD)
-```
+| Comando | O que faz | Google |
+|---|---|---|
+| `python -m scripts.teste_visualizar` | Mostra os ocupados, livres e conflitos de amanhã e o JSON do contrato | Real (leitura) |
+| `python -m scripts.teste_visualizar 2026-11-04` | O mesmo, para um dia específico (AAAA-MM-DD) | Real (leitura) |
+| `python -m scripts.teste_criar` | Cria um evento com um serviço simulado e mostra o que seria enviado à API | Simulado |
+| `python -m scripts.teste_criar_real` | Pede um JSON, mostra o evento e só cria na agenda real se você digitar `CRIAR` | Real (escrita) |
 
-Use `python -m` (e não `python scripts/teste_visualizar.py`), senão aparece `ModuleNotFoundError: destrava`.
-
-## Problemas comuns
-
-| Mensagem ou sintoma | O que fazer |
-|---|---|
-| Erro de conexão com o modelo, ou demora muito | Confira se o Ollama está rodando (`ollama list`) e se o modelo foi baixado (`ollama pull gemma2:2b`). |
-| `ModuleNotFoundError: destrava` | Rode a partir da raiz do projeto e use `python -m scripts.teste_visualizar`. |
-| `credentials.json` não encontrado | Siga a seção "Credenciais do Google" e salve o arquivo na raiz do projeto. |
-| `SSL: CERTIFICATE_VERIFY_FAILED` ao falar com o Google | A rede pode estar interceptando a conexão (ex.: Wi-Fi com login). Tente outra rede. Não desative a verificação de certificado. |
-| Erro de fuso horário no Windows (`ZoneInfo`) | Instale o pacote de fusos: `pip install tzdata` (já está no `requirements.txt`). |
-| Resposta com período errado | O modelo pequeno pode errar. Reformule com datas mais claras (ex.: "amanhã", "esta semana"). |
-| Autorização do Google travada ou com conta errada | Apague o arquivo `token_readonly.json` e rode de novo para autorizar novamente. |
-
-## Estrutura
-
-```
-destrava/
-├── core/      configurações e conexões compartilhadas (config, google_client, llm_client, agenda_engine, models)
-├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
-└── prompts/   prompts de cada agente
-docs/          documentação técnica de cada agente
-scripts/       scripts de teste manual
-cli.py         linha de comando: cole um JSON e veja o JSON do agente
-```
-
-## Configuração
-
-Fuso horário, horários de acordar e dormir, duração mínima de um horário livre, modelo e demais valores ficam em `destrava/core/config.py`.
-
-Para conferir se a configuração carrega, na raiz do projeto:
-
-```
-python -c "from destrava.core import config; print(config.MODELO, config.FUSO)"
-```
-
-## Testes
+### 3. Testes automáticos
 
 ```
 python -m pytest tests/
 ```
 
-Os testes simulam o Google e bloqueiam o LLM nos caminhos em JSON, então não precisam de `credentials.json` nem do Ollama.
+Os testes simulam o Google, então não precisam de `credentials.json` nem de internet.
+
+## Problemas comuns
+
+| Mensagem ou sintoma | O que fazer |
+|---|---|
+| `ModuleNotFoundError: destrava` | Rode a partir da raiz do projeto e use `python -m scripts.teste_visualizar` (com `-m`). |
+| `credentials.json` não encontrado | Siga a seção "Credenciais do Google" e salve o arquivo na raiz do projeto. |
+| `SSL: CERTIFICATE_VERIFY_FAILED` ao falar com o Google | A rede pode estar interceptando a conexão (ex.: Wi-Fi com login). Tente outra rede. Não desative a verificação de certificado. |
+| Erro de fuso horário no Windows (`ZoneInfo`) | Instale o pacote de fusos: `pip install tzdata` (já está no `requirements.txt`). |
+| Autorização do Google travada ou com conta errada | Apague o arquivo `token_readonly.json` (visualizar) ou `token_calendar.json` (criar) e rode de novo para autorizar novamente. |
+
+## Estrutura
+
+```
+destrava/
+├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
+├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
+└── prompts/   prompts dos agentes ainda em desenvolvimento (editar, excluir)
+docs/          documentação técnica de cada agente e contrato JSON
+scripts/       scripts de teste manual
+tests/         testes automáticos (Google simulado)
+cli.py         linha de comando: cole um JSON e veja o JSON do agente
+```
+
+## Configuração
+
+Fuso horário, horários de acordar e dormir, duração mínima de um horário livre e demais valores ficam em `destrava/core/config.py`.
+
+Para conferir se a configuração carrega, na raiz do projeto:
+
+```
+python -c "from destrava.core import config; print(config.FUSO)"
+```
 
 ## Documentação
 

@@ -120,7 +120,7 @@ Os valores (horários, duração mínima, fuso) estão em `destrava/core/config.
 
 - `google_client`: `get_service([config.ESCOPO_SOMENTE_LEITURA])` (token em `token_readonly.json`) e `listar_eventos`.
 - `agenda_engine`: `montar_visualizacao` e `normalizar_fuso`.
-- `models`: `PedidoVisualizacao` (entrada) e `RespostaVisualizacao`, `Periodo`, `FluxoVisualizacao`, `Etapa`, `ErroInfo` (saída).
+- `models`: `PedidoVisualizacao` (entrada) e `RespostaAgente`, `Periodo`, `Fluxo`, `Etapa`, `ErroInfo` (saída).
 - `config`: `FUSO`, `HORARIO_ACORDAR`, `HORARIO_DORMIR`, `DURACAO_MINIMA_LIVRE`, `DIA_INTEIRO_BLOQUEIA`, `ESCOPO_SOMENTE_LEITURA`.
 
 ## Como testar

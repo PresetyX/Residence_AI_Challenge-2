@@ -1,16 +1,19 @@
 """CLI do Destrava: agentes de visualização e criação da agenda.
 
-Contrato: cada agente recebe um JSON e devolve um JSON (sem LLM).
+Contrato: cada agente recebe um JSON e devolve um JSON (sem LLM), no mesmo
+formato: {"status", "acao", "periodo", "dados", "fluxo", "erro"}.
 
     visualizar  entrada: {"inicio": "...", "fim": "..."}
-                saída:   {"livres": [...], "total_minutos_livres": ...}
+                dados:   {"livres": [...], "total_minutos_livres": ...}
                 Se "fim" for igual a "inicio", o período vira o dia inteiro.
 
     criar       entrada: {"titulo": "...", "inicio": "...", "fim": "..."}
-                saída:   {"evento": {"id", "titulo", "inicio", "fim", "link"}}
+                dados:   {"evento": {"id", "titulo", "inicio", "fim", "link"}}
+
+Pedido inválido ou falha no Google: status "erro" e o campo "erro" preenchido.
 
 As datas são ISO 8601 (ex.: "2026-11-04T14:00:00-03:00"); sem fuso, valem no
-horário de config.FUSO. Pedido inválido devolve {"erro": "Pedido inválido", ...}.
+horário de config.FUSO. O formato completo está em docs/contrato.md.
 
 Uso (na raiz do projeto):
     python cli.py
