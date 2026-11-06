@@ -54,68 +54,70 @@ Saída: água moderada, energia moderada, resíduos alta, transporte alta, suste
 - Os dados devem ser criptografados com um método de álgebra linear
 
 ## Etapas
+As etapas abaixo são fatias verticais: cada uma atravessa as camadas necessárias (interface, regras e dados) e termina com algo que pode ser demonstrado e testado. A Etapa 1 é o esqueleto mínimo, a funcionalidade mais fina possível funcionando de ponta a ponta.
 
-### Etapa 1 – Organização do projeto e do ambiente
-- Objetivo: deixar o ambiente pronto antes de programar
-- Entregáveis: repositório no Git com estratégia de branches, ambiente Python configurado, estrutura de pastas do projeto, README inicial
+### Etapa 1 – Esqueleto: um dia com a classificação da água
+- Objetivo: ter o ambiente e o caminho completo de entrada, regra e saída com o indicador mais simples
+- Entregáveis: ambiente Python, repositório com branches, leitura da data e dos litros de água com validação, classificação (alta, moderada ou baixa) e exibição
+- Demonstração: informar 180 litros e ver "moderada sustentabilidade"
 - Dependências: nenhuma
 
-### Etapa 2 – Definição das regras de classificação
-- Objetivo: transformar as tabelas de classificação e o sistema de ponderação em regras claras
-- Entregáveis: faixas de cada indicador, pesos dos meios de transporte, critério da sustentabilidade geral, tratamento dos valores nos limites das faixas
-- Dependências: nenhuma
-
-### Etapa 3 – Entrada e validação dos dados de um dia
-- Objetivo: ler os dados de um monitoramento com segurança
-- Entregáveis: perguntas ao usuário, menu de transportes, validação (números positivos, percentual entre 0 e 100, data válida, opção de transporte existente)
+### Etapa 2 – Energia e resíduos
+- Objetivo: classificar mais dois indicadores
+- Entregáveis: leitura e validação de kWh e de percentual reciclado (0 a 100), regras de classificação de cada um, exibição junto com a água
+- Demonstração: informar 6,5 kWh e 60% reciclado e ver as duas classificações, testando também os valores nos limites das faixas
 - Dependências: Etapa 1
 
-### Etapa 4 – Classificação de um dia
-- Objetivo: classificar cada indicador e o resultado geral
-- Entregáveis: funções de classificação por indicador, cálculo da sustentabilidade geral, exibição do resultado
-- Dependências: Etapas 2 e 3
+### Etapa 3 – Transporte com ponderação
+- Objetivo: classificar o meio de transporte
+- Entregáveis: menu de meios de transporte (incluindo os que a equipe acrescentar), pesos de cada meio, regra de classificação
+- Demonstração: escolher caminhada e ver alta sustentabilidade, escolher carro a combustível e ver baixa
+- Dependências: Etapa 2
 
-### Etapa 5 – Modelagem do banco de dados
-- Objetivo: definir como os monitoramentos serão armazenados
-- Entregáveis: tabela de monitoramento com os campos exigidos e campos extras, script de criação, registros de exemplo inseridos manualmente
-- Dependências: Etapa 1
+### Etapa 4 – Sustentabilidade geral do dia
+- Objetivo: resumir o dia em uma classificação única
+- Entregáveis: regra de ponderação da classificação geral definida pela equipe, exibição do resultado completo no formato do exemplo
+- Demonstração: repetir o exemplo do enunciado (24/3/2025) e obter a classificação geral esperada
+- Dependências: Etapa 3
 
-### Etapa 6 – Conexão com o banco e acesso aos dados
-- Objetivo: ter uma camada única de acesso ao banco
-- Entregáveis: módulo de conexão, funções de inserção, consulta, atualização e remoção
+### Etapa 5 – Guardar um dia no banco (inserir)
+- Objetivo: tornar o cadastro permanente
+- Entregáveis: tabela de monitoramento criada manualmente, conexão com o banco, menu principal com a opção Inserir, gravação do registro e exibição da classificação do dia
+- Demonstração: cadastrar um dia pelo menu e conferir o registro na tabela
+- Dependências: Etapa 4
+
+### Etapa 6 – Listar monitoramentos com classificação
+- Objetivo: consultar o que foi cadastrado
+- Entregáveis: leitura dos registros no banco, opção de listagem no menu, classificação de cada dia exibida
+- Demonstração: cadastrar três dias e ver a lista com as classificações de cada um
 - Dependências: Etapa 5
 
-### Etapa 7 – Cálculo de médias e classificação geral
-- Objetivo: resumir vários dias em uma única classificação
-- Entregáveis: leitura dos registros do banco, médias de água, energia, resíduos, percentual reciclado e transporte, classificação pelas médias
-- Dependências: Etapas 4 e 6
-
-### Etapa 8 – Menu principal
-- Objetivo: integrar as funcionalidades em um menu de opções
-- Entregáveis: menu com as seis opções, repetição até o usuário sair, tratamento de opção inválida
+### Etapa 7 – Médias e classificação geral
+- Objetivo: resumir vários dias
+- Entregáveis: cálculo das médias de água, energia, resíduos, percentual reciclado e transporte, classificação pelas médias, opção de menu
+- Demonstração: usar dados de exemplo com média conhecida e ver o resultado bater com o cálculo manual
 - Dependências: Etapa 6
 
-### Etapa 9 – Inserir monitoramento
-- Objetivo: cadastrar novos dias pelo sistema
-- Entregáveis: tela de inserção reaproveitando a entrada e a validação, gravação no banco, exibição da classificação do dia
-- Dependências: Etapas 4, 6 e 8
+### Etapa 8 – Alterar monitoramento
+- Objetivo: corrigir um dia já cadastrado
+- Entregáveis: escolha do registro, nova entrada com validação, atualização no banco e nova classificação
+- Demonstração: alterar o consumo de água de um dia e ver a classificação mudar
+- Dependências: Etapa 6
 
-### Etapa 10 – Alterar e apagar monitoramento
-- Objetivo: corrigir e remover registros já cadastrados
-- Entregáveis: escolha do registro, alteração com nova validação, remoção com confirmação
-- Dependências: Etapa 9
+### Etapa 9 – Apagar monitoramento
+- Objetivo: remover um registro escolhido
+- Entregáveis: escolha do registro, confirmação, remoção no banco e retorno ao menu
+- Demonstração: apagar um dia e ver que ele sumiu da lista e das médias
+- Dependências: Etapa 6
 
-### Etapa 11 – Listagem e médias no menu
-- Objetivo: consultar os dados e os resultados pelo menu
-- Entregáveis: listagem de cada dia com sua classificação, opção de médias com classificação geral
-- Dependências: Etapas 7 e 8
-
-### Etapa 12 – Criptografia dos dados
+### Etapa 10 – Criptografia dos dados
 - Objetivo: proteger os dados armazenados
-- Entregáveis: algoritmo de álgebra linear (por exemplo, Cifra de Hill) para cifrar e decifrar, matriz-chave válida, aplicação na gravação e na leitura do banco
-- Dependências: Etapa 6
+- Entregáveis: algoritmo de álgebra linear (por exemplo, Cifra de Hill) com matriz-chave válida, cifra na gravação e decifra na leitura, em todas as opções do menu
+- Demonstração: cadastrar um dia, ver os valores cifrados no banco e as telas continuarem mostrando os valores corretos
+- Dependências: Etapas 5 a 9
 
-### Etapa 13 – Testes, documentação e entrega final
+### Etapa 11 – Testes, documentação e entrega final
 - Objetivo: validar o sistema e deixá-lo pronto para uso
-- Entregáveis: testes das faixas de classificação (incluindo os limites), das médias e do CRUD, código comentado, README com instruções de execução
+- Entregáveis: testes das faixas (incluindo os limites), das médias e do CRUD, código comentado, README com instruções de execução
+- Demonstração: executar o roteiro completo do menu em um ambiente limpo, seguindo apenas o README
 - Dependências: todas as anteriores
