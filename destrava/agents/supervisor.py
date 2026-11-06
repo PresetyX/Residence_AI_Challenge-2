@@ -1,10 +1,9 @@
 """Supervisor do Destrava: visualiza e cria eventos (sem RAG)."""
 
-from datetime import datetime
+from datetime import datetime, date, time, timedelta
 from typing import Callable, Literal
 
-from pydantic import BaseModel, ValidationError
-
+from pydantic import BaseModel, ValidationError, ConfigDict, Field
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.agents.criar import AgenteCriar
 
@@ -19,6 +18,29 @@ class InterpretacaoSupervisor(BaseModel):
     dados: dict | None = None
     pergunta: str | None = None
 
+class TarefaPlanejador(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    ordem: int = Field(ge=1)
+    titulo: str = Field(min_length=1)
+
+    tipo: Literal[
+        "requisitos",
+        "interface",
+        "banco_de_dados",
+        "backend",
+        "frontend",
+        "testes",
+        "documentacao"
+    ]
+
+    dificuldade: int = Field(ge=1, le=3)
+
+
+class RespostaPlanejador(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    tarefas: list[TarefaPlanejador] = Field(min_length=1)
 
 def _formatar_horarios(resposta: dict) -> str:
     """Transforma os horários livres em texto."""
@@ -55,13 +77,303 @@ class AgenteSupervisor:
         visualizador: AgenteVisualizar | None = None,
         criador: AgenteCriar | None = None,
         consultar_llm: Callable[[str], str] | None = None,
+        planejador=None,
     ):
         self.visualizador = visualizador if visualizador is not None else AgenteVisualizar()
         self.criador = criador if criador is not None else AgenteCriar()
         self.consultar_llm = consultar_llm if consultar_llm is not None else perguntar
 
-        # Guarda apenas o evento que está aguardando confirmação.
+        self.planejador = planejador
         self.evento_pendente = None
+
+    
+    def receber_planejamento(self, projeto: str, prazo: str) -> dict:
+        """Recebe e valida as subtarefas devolvidas pelo Planejador."""
+
+        if self.planejador is None:
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": "Nenhum Planejador foi conectado."
+            }
+
+        if not isinstance(projeto, str) or not projeto.strip():
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": "Informe um projeto válido."
+            }
+
+        try:
+            data_prazo = date.fromisoformat(prazo)
+
+            if data_prazo.isoformat() != prazo:
+                raise ValueError()
+
+        except (ValueError, TypeError):
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": "Informe o prazo no formato AAAA-MM-DD."
+            }
+
+        try:
+            resposta = self.planejador.executar(projeto.strip(), prazo)
+
+            plano = RespostaPlanejador.model_validate(resposta)
+
+            tarefas = plano.tarefas
+            ordens = [tarefa.ordem for tarefa in tarefas]
+
+            if ordens != list(range(1, len(tarefas) + 1)):
+                raise ValueError("A ordem das tarefas é inválida.")
+
+            if any(not tarefa.titulo.strip() for tarefa in tarefas):
+                raise ValueError("Existe uma tarefa com título vazio.")
+
+        except (ValidationError, ValueError, TypeError) as erro:
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": f"Resposta inválida do Planejador: {erro}"
+            }
+
+        except Exception as erro:
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": f"Falha ao executar o Planejador: {erro}"
+            }
+
+        return {
+            "status": "sucesso",
+            "acao": "planejar",
+            "mensagem": f"Recebi {len(tarefas)} tarefas do Planejador.",
+            "dados": {
+                "projeto": projeto.strip(),
+                "prazo": prazo,
+                "tarefas": plano.model_dump()["tarefas"]
+            }
+        }
+
+        
+    def consultar_periodos_projeto(self, projeto: str, prazo: str) -> dict:
+        """Recebe as tarefas e consulta os horários livres até o prazo."""
+
+        # 1. Recebe e valida as tarefas do Planejador.
+        planejamento = self.receber_planejamento(projeto, prazo)
+
+        if planejamento["status"] != "sucesso":
+            return planejamento
+
+        # 2. Define o período da consulta.
+        inicio = datetime.now(config.FUSO)
+
+        data_prazo = date.fromisoformat(prazo)
+
+        # Inclui todo o dia do prazo.
+        fim = datetime.combine(
+            data_prazo + timedelta(days=1),
+            time.min,
+            tzinfo=config.FUSO
+        )
+
+        if fim <= inicio:
+            return {
+                "status": "erro",
+                "acao": "planejar",
+                "mensagem": "O prazo do projeto já passou."
+            }
+
+        # 3. Monta o JSON esperado pelo Agente Visualizar.
+        pedido_visualizacao = {
+            "inicio": inicio.isoformat(),
+            "fim": fim.isoformat()
+        }
+
+        # 4. Solicita os horários livres.
+        try:
+            resposta = self.visualizador.executar_json(
+                pedido_visualizacao
+            )
+
+        except Exception as erro:
+            return {
+                "status": "erro",
+                "acao": "visualizar",
+                "mensagem": f"Falha ao consultar a agenda: {erro}"
+            }
+
+        if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
+            return {
+                "status": "erro",
+                "acao": "visualizar",
+                "mensagem": "Não foi possível consultar os horários livres.",
+                "erro": resposta.get("erro") if isinstance(resposta, dict) else None
+            }
+
+        dados = resposta.get("dados")
+
+        if not isinstance(dados, dict) or not isinstance(dados.get("livres"), list):
+            return {
+                "status": "erro",
+                "acao": "visualizar",
+                "mensagem": "O Visualizar retornou dados inválidos."
+            }
+
+        # 5. Junta as tarefas e os períodos livres.
+        return {
+            "status": "sucesso",
+            "acao": "planejar",
+            "mensagem": "Tarefas e horários livres recebidos com sucesso.",
+            "periodo": resposta.get("periodo"),
+            "dados": {
+                "projeto": projeto.strip(),
+                "prazo": prazo,
+                "tarefas": planejamento["dados"]["tarefas"],
+                "livres": dados["livres"],
+                "total_minutos_livres": dados["total_minutos_livres"]
+            }
+        }
+    def preparar_agendamento(self, projeto: str, prazo: str) -> dict:
+        """Monta uma prévia: cada tarefa recebe 60 minutos em um horário livre."""
+        # Preparar um novo cronograma cancela a prévia anterior.
+        self.cronograma_pendente = None
+
+        if self.evento_pendente is not None:
+            return {
+                "status": "erro", "acao": "planejar",
+                "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
+            }
+
+        # Aproveita a Etapa 2: tarefas do mock + agenda real do Visualizar.
+        consulta = self.consultar_periodos_projeto(projeto, prazo)
+        if consulta.get("status") != "sucesso":
+            return consulta
+
+        try:
+            tarefas = consulta["dados"]["tarefas"]
+            livres = consulta["dados"]["livres"]
+
+            # Cada bloco tem início e fim; podemos avançar o início conforme usamos horas.
+            blocos = sorted(
+                [
+                    [datetime.fromisoformat(b["inicio"]), datetime.fromisoformat(b["fim"])]
+                    for b in livres
+                ],
+                key=lambda bloco: bloco[0]
+            )
+
+            if not tarefas:
+                raise ValueError("Nenhuma tarefa recebida.")
+
+            eventos = []
+            for tarefa in tarefas:
+                for bloco in blocos:
+                    inicio = max(bloco[0], datetime.now(config.FUSO))
+                    # Não cria eventos com segundos quebrados, como 15:14:25.
+                    if inicio.second or inicio.microsecond:
+                        inicio = inicio.replace(second=0, microsecond=0) + timedelta(minutes=1)
+
+                    fim = inicio + timedelta(minutes=60)  # Temporário: rede neural virá depois.
+                    if fim <= bloco[1]:
+                        eventos.append({
+                            "titulo": f"[Destrava] {tarefa['titulo']}",
+                            "inicio": inicio.isoformat(),
+                            "fim": fim.isoformat(),
+                        })
+                        bloco[0] = fim  # Reserva esse horário na prévia.
+                        break
+                else:
+                    return {
+                        "status": "erro", "acao": "planejar",
+                        "mensagem": f"Não há horário livre suficiente para '{tarefa['titulo']}'. Nenhum evento foi criado."
+                    }
+        except (KeyError, TypeError, ValueError) as erro:
+            return {"status": "erro", "acao": "planejar", "mensagem": f"Dados inválidos: {erro}"}
+
+        self.cronograma_pendente = eventos
+        return {
+            "status": "confirmacao",
+            "acao": "planejar",
+            "mensagem": "Confira a prévia. Responda 'sim' para criar ou 'não' para cancelar.",
+            "dados": {"projeto": projeto, "prazo": prazo, "eventos": eventos}
+        }
+
+    def confirmar_agendamento(self, confirmado: bool) -> dict:
+        """Cria o cronograma somente com confirmação explícita."""
+        eventos = self.cronograma_pendente
+        if eventos is None:
+            return {"status": "erro", "acao": "planejar", "mensagem": "Não existe cronograma aguardando confirmação."}
+
+        # Apaga a pendência: outro 'sim' não pode repetir a criação.
+        self.cronograma_pendente = None
+
+        if not confirmado:
+            return {"status": "cancelado", "acao": "planejar", "mensagem": "Cancelado. Nenhum evento foi criado."}
+
+        # Checa TODOS os horários antes de criar o primeiro evento.
+        for evento in eventos:
+            if not self.verificar_disponibilidade(evento):
+                return {
+                    "status": "erro", "acao": "planejar",
+                    "mensagem": f"O horário de '{evento['titulo']}' não está mais livre. Nenhum evento foi criado."
+                }
+
+        criados = []
+        for evento in eventos:
+            # Também verifica imediatamente antes de cada criação.
+            if not self.verificar_disponibilidade(evento):
+                return {
+                    "status": "parcial" if criados else "erro",
+                    "acao": "planejar",
+                    "mensagem": "A disponibilidade mudou durante o agendamento. Confira a agenda antes de tentar novamente.",
+                    "dados": {"eventos_criados": criados}
+                }
+
+            try:
+                resposta = self.criador.executar_json(evento)
+            except Exception as erro:
+                return {
+                    "status": "parcial" if criados else "erro",
+                    "acao": "planejar",
+                    "mensagem": f"Falha ao criar evento: {erro}. Confira a agenda antes de tentar novamente.",
+                    "dados": {"eventos_criados": criados}
+                }
+
+            if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
+                return {
+                    "status": "parcial" if criados else "erro",
+                    "acao": "planejar",
+                    "mensagem": "O Google não confirmou uma das criações. Confira a agenda antes de tentar novamente.",
+                    "dados": {"eventos_criados": criados}
+                }
+
+            try:
+                criado = resposta["dados"]["evento"]
+                criados.append(criado)
+            except (KeyError, TypeError):
+                return {
+                    "status": "parcial",
+                    "acao": "planejar",
+                    "mensagem": "O Criar confirmou sucesso, mas não devolveu os dados do evento. Verifique sua agenda.",
+                    "dados": {"eventos_criados": criados}
+                }
+
+            # O Criar sinaliza se o Google devolveu um horário diferente do pedido.
+            conferencia = (resposta.get("fluxo") or {}).get("fim", {}).get("detalhe") or {}
+            if conferencia.get("periodo_confere") is False:
+                return {
+                    "status": "parcial", "acao": "planejar",
+                    "mensagem": "O Google devolveu um horário diferente do solicitado. Verifique sua agenda.",
+                    "dados": {"eventos_criados": criados}
+                }
+
+        return {
+            "status": "sucesso", "acao": "planejar",
+            "mensagem": f"{len(criados)} tarefas criadas no Google Calendar!",
+            "dados": {"eventos_criados": criados}
+        }
 
     def verificar_disponibilidade(self, evento: dict) -> bool:
         """Confere se o horário inteiro aparece como livre."""
@@ -118,6 +430,7 @@ class AgenteSupervisor:
             if pedido.lower() == "sim":
                 evento = self.evento_pendente
                 self.evento_pendente = None
+                self.cronograma_pendente = None
 
                 # Consulta novamente para evitar usar disponibilidade antiga.
                 if not self.verificar_disponibilidade(evento):
