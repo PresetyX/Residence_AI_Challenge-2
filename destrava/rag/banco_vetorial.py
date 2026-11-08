@@ -1,88 +1,101 @@
 """
-Banco vetorial do RAG: guarda os trechos com o vetor (embedding) de cada um e
-responde "quais trechos são mais parecidos com este vetor?".
+Banco vetorial do RAG: Chroma, gravado em disco, acessado pelo LangChain.
 
-``BancoVetorial`` é o contrato (Protocol): quem usa o banco só depende dele.
-``BancoVetorialLocal`` é a implementação atual, em Python puro, que compara
-a pergunta com todos os trechos por similaridade de cosseno. Para uma base
-pequena (centenas de trechos) isso é instantâneo e não exige dependência nova.
+Guarda cada trecho com o seu vetor (embedding) e responde "quais trechos têm
+significado mais parecido com esta pergunta?".
 
-Para trocar por um banco vetorial de verdade (Chroma, FAISS, pgvector...),
-escreva uma classe com os mesmos membros e passe-a ao ``Recuperador``; nada
-mais muda.
+Peças:
+    - ``chromadb.PersistentClient``: o banco em si, numa pasta local (SQLite +
+      índice HNSW). Não precisa de servidor.
+    - ``langchain_chroma.Chroma``: o adaptador que transforma o Chroma num
+      ``VectorStore`` do LangChain. É esse formato que a Indexing API
+      (indice.py) sabe alimentar: ela adiciona e apaga documentos por ID.
+    - ``BancoVetorial`` (esta classe): só junta as duas coisas com as escolhas
+      do projeto (cosseno, telemetria desligada) e devolve a busca no formato
+      que o recuperador usa.
+
+Quem gera os vetores é o objeto ``Embeddings`` recebido (EmbeddingsOllama, do
+llm_client): o Chroma o chama ao adicionar trechos (``embed_documents``) e ao
+buscar (``embed_query``).
+
+Para trocar por outro banco (FAISS, Qdrant, pgvector...), basta outro
+``VectorStore`` do LangChain que aceite apagar por ID; a Indexing API e o
+recuperador continuam iguais.
 """
 
-import math
-from typing import Protocol
+from pathlib import Path
 
-from destrava.rag.chunker import Trecho
+import chromadb
+from chromadb.config import Settings
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
 
-
-class BancoVetorial(Protocol):
-    """O que o RAG precisa de um banco vetorial."""
-
-    @property
-    def trechos(self) -> list[Trecho]:
-        """Os trechos guardados, na ordem em que foram adicionados."""
-
-    def buscar(
-        self, vetor: list[float], n: int | None = None, minimo: float = 0.0
-    ) -> list[tuple[int, float]]:
-        """Posições dos trechos mais parecidos com o vetor, com a similaridade.
-
-        Devolve pares (posição em ``trechos``, cosseno), do mais parecido para
-        o menos, só com cosseno >= minimo e no máximo n pares (todos se n for
-        None). Levanta ValueError se o vetor tiver tamanho diferente do dos
-        vetores guardados.
-        """
+# Nome da coleção dentro da pasta do banco. Cada base (supervisor, planejador)
+# e cada modelo de embeddings tem a sua pasta (ver indice.py), então um nome
+# fixo basta.
+COLECAO = "trechos"
 
 
-def normalizar(vetor: list[float]) -> list[float]:
-    """Deixa o vetor com comprimento 1 (assim o cosseno vira um produto escalar)."""
-    comprimento = math.sqrt(sum(x * x for x in vetor))
-    return [x / comprimento for x in vetor] if comprimento else list(vetor)
+class BancoVetorial:
+    """Chroma persistente de uma base de conhecimento, com busca por cosseno."""
 
+    def __init__(self, pasta: Path, embeddings: Embeddings):
+        """Abre (ou cria) o banco na pasta. Não chama o Ollama.
 
-class BancoVetorialLocal:
-    """Banco vetorial em memória, com busca exata por similaridade de cosseno."""
-
-    def __init__(self, trechos: list[Trecho], vetores: list[list[float]]):
-        """
         Args:
-            trechos: Trechos a guardar.
-            vetores: Um vetor por trecho, na mesma ordem e do mesmo tamanho.
+            pasta: Onde o Chroma grava os arquivos (criada se não existir).
+            embeddings: Modelo que transforma texto em vetor.
+        """
+        pasta.mkdir(parents=True, exist_ok=True)
+        # anonymized_telemetry=False: por padrão o Chroma envia estatísticas de
+        # uso pela internet. Um projeto local não tem por que fazer isso.
+        cliente = chromadb.PersistentClient(
+            path=str(pasta), settings=Settings(anonymized_telemetry=False)
+        )
+        self.vector_store = Chroma(
+            collection_name=COLECAO,
+            embedding_function=embeddings,
+            client=cliente,
+            # "hnsw:space": "cosine" faz o Chroma medir DISTÂNCIA DE COSSENO
+            # (= 1 - cosseno). O padrão seria a distância euclidiana (L2), que
+            # depende do comprimento dos vetores e não teria a escala de 0 a 1
+            # que config.RAG_SIMILARIDADE_MINIMA supõe. Só vale na criação da
+            # coleção; uma coleção existente mantém a métrica com que nasceu.
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+
+    def total(self) -> int:
+        """Quantos trechos (vetores) estão guardados."""
+        return self.vector_store._collection.count()
+
+    def buscar(self, pergunta: str, k: int, minimo: float = 0.0) -> list[tuple[Document, float]]:
+        """Os trechos de significado mais parecido com a pergunta.
+
+        Args:
+            pergunta: Texto da pergunta (o Chroma gera o vetor dela com
+                ``embed_query``, que aplica o prefixo de consulta).
+            k: Quantos trechos pedir ao banco, no máximo.
+            minimo: Similaridade de cosseno mínima para um trecho entrar.
+
+        Returns:
+            Pares (documento, similaridade de cosseno), do mais parecido para
+            o menos. O documento traz o texto indexado e os metadados (fonte,
+            seção, posição) gravados na indexação.
 
         Raises:
-            ValueError: Se a quantidade de vetores for diferente da de trechos
-                ou se os vetores tiverem tamanhos diferentes.
+            ErroLLM: Se o Ollama falhar ao gerar o vetor da pergunta.
         """
-        if len(trechos) != len(vetores):
-            raise ValueError("Deve haver exatamente um vetor por trecho.")
-        if len({len(v) for v in vetores}) > 1:
-            raise ValueError("Todos os vetores devem ter o mesmo tamanho.")
-
-        self._trechos = list(trechos)
-        self._vetores = [normalizar(v) for v in vetores]
-        self.dimensao = len(vetores[0]) if vetores else 0
-
-    @property
-    def trechos(self) -> list[Trecho]:
-        return self._trechos
-
-    def buscar(
-        self, vetor: list[float], n: int | None = None, minimo: float = 0.0
-    ) -> list[tuple[int, float]]:
-        if self._vetores and len(vetor) != self.dimensao:
-            raise ValueError(
-                f"O vetor tem {len(vetor)} dimensões, mas o banco usa {self.dimensao} "
-                "(o modelo de embeddings mudou desde que o índice foi gerado?)."
-            )
-
-        consulta = normalizar(vetor)
-        pares = [
-            (i, sum(a * b for a, b in zip(consulta, doc)))
-            for i, doc in enumerate(self._vetores)
-        ]
-        pares = [(i, s) for i, s in pares if s >= minimo]
-        pares.sort(key=lambda p: (-p[1], p[0]))
-        return pares if n is None else pares[:n]
+        if k <= 0 or self.total() == 0:
+            return []
+        # similarity_search_with_score devolve a DISTÂNCIA de cosseno (0 =
+        # idêntico, 2 = oposto). Convertemos para similaridade (1 = idêntico),
+        # a mesma escala de config.RAG_SIMILARIDADE_MINIMA.
+        # (O LangChain também tem similarity_search_with_relevance_scores, que
+        # faz essa conta, mas emite avisos quando o cosseno dá negativo.)
+        # min(k, total): pedir mais do que existe faz o Chroma emitir aviso.
+        pares = self.vector_store.similarity_search_with_score(pergunta, k=min(k, self.total()))
+        com_similaridade = [(doc, 1.0 - distancia) for doc, distancia in pares]
+        # O Chroma já devolve do mais próximo para o mais distante; só cortamos
+        # os que ficaram abaixo do mínimo.
+        return [(doc, sim) for doc, sim in com_similaridade if sim >= minimo]

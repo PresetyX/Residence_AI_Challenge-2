@@ -3,42 +3,102 @@ Fase de indexação do RAG:
 
     base de conhecimento (arquivos) → chunking → embedding dos chunks → armazenamento
 
-Lê os arquivos de uma base (``config.RAG_BASES``), divide em trechos, gera um
-embedding por trecho no Ollama (em lotes) e guarda o resultado em disco
-(``config.PASTA_INDICES_RAG``).
+Lê os arquivos de uma base (``config.RAG_BASES``), divide em trechos e
+sincroniza o banco vetorial (Chroma) com a **Indexing API do LangChain**
+(``langchain_core.indexing.index``).
 
-A cópia em disco só é reaproveitada se os arquivos, os parâmetros de chunking e
-o modelo de embeddings forem os mesmos; senão o índice é refeito sozinho. Assim,
-editar um arquivo da base não deixa o RAG com conhecimento velho.
+Como a Indexing API evita trabalho repetido:
+    - Cada trecho vira um ``Document`` do LangChain. A API calcula um hash do
+      conteúdo + metadados de cada um e o usa como ID.
+    - Um ``RecordManager`` (aqui, ``SQLRecordManager``, num arquivo SQLite) anota
+      quais hashes já estão no banco vetorial.
+    - A cada execução, todos os trechos atuais são entregues à API. Ela:
+        * pula os que já estão no banco (hash conhecido): nenhum embedding novo;
+        * adiciona os novos ou alterados (só eles passam pelo Ollama);
+        * apaga do banco os que não vieram desta vez (``cleanup="full"``):
+          trechos de arquivos editados ou apagados.
+  Resultado: editar um arquivo da base só gera embeddings dos trechos que
+  mudaram, e o RAG nunca fica com conhecimento velho.
+
+O que fica em disco (``config.PASTA_INDICES_RAG``, no .gitignore):
+
+    .rag_indices/<base>/<assinatura do modelo>/chroma/          banco vetorial
+    .rag_indices/<base>/<assinatura do modelo>/registro.sqlite  RecordManager
+
+A "assinatura do modelo" é um hash do modelo de embeddings e do prefixo de
+documento. Trocar qualquer um deles muda TODOS os vetores (e às vezes até o
+tamanho deles), então isso cria uma pasta nova, e a antiga é apagada.
+
+O chunking roda a cada execução (é rápido: só texto). O que a Indexing API
+poupa é a parte cara, os embeddings. Os trechos do chunking também alimentam o
+BM25, que funciona mesmo sem o Ollama.
 
 Uma base vazia (sem nenhum .md ou .txt) é válida: o índice sai sem trechos.
 """
 
 import hashlib
 import json
-import os
+import shutil
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel
+from langchain_classic.indexes import SQLRecordManager
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_core.indexing import index
+from sqlalchemy.engine import URL
 
 from destrava.core import config
-from destrava.core.llm_client import ErroLLM, gerar_embeddings
-from destrava.rag.banco_vetorial import BancoVetorialLocal
+from destrava.core.llm_client import ErroLLM, criar_embeddings
+from destrava.rag.banco_vetorial import BancoVetorial
 from destrava.rag.chunker import Trecho, dividir_texto
 
 
-class Indice(BaseModel):
-    """Trechos indexados e, se o Ollama estava disponível, o vetor de cada um."""
+@dataclass
+class Indice:
+    """Trechos de uma base e, se o Ollama estava disponível, o banco vetorial deles.
 
-    assinatura: str
+    Attributes:
+        trechos: Todos os trechos da base, na ordem dos arquivos. O BM25 usa
+            esta lista, e as buscas devolvem posições nela.
+        banco: Banco vetorial sincronizado com ``trechos``, ou None (Ollama fora
+            do ar, ``usar_embeddings=False`` ou base vazia). None = o RAG busca
+            só por palavras-chave.
+        estatisticas: O que a Indexing API fez nesta execução: quantos trechos
+            adicionou, pulou (já estavam no banco), atualizou e apagou.
+    """
+
     trechos: list[Trecho]
-    embeddings: list[list[float]] | None = None
+    banco: BancoVetorial | None = None
+    estatisticas: dict[str, int] = field(default_factory=dict)
 
-    def banco_vetorial(self) -> BancoVetorialLocal | None:
-        """O banco vetorial deste índice, ou None se não há embeddings."""
-        if self.embeddings is None:
-            return None
-        return BancoVetorialLocal(self.trechos, self.embeddings)
+    def __post_init__(self) -> None:
+        # Mapa (fonte, posição no arquivo) → posição em `trechos`. É assim que
+        # um documento devolvido pelo Chroma é ligado de volta ao Trecho.
+        self._posicoes = {chave: i for i, chave in enumerate(_chaves(self.trechos))}
+
+    def posicao(self, documento: Document) -> int | None:
+        """Posição em ``trechos`` de um documento do banco vetorial (None se não houver)."""
+        chave = (documento.metadata.get("fonte"), documento.metadata.get("posicao"))
+        return self._posicoes.get(chave)
+
+
+def _chaves(trechos: list[Trecho]) -> list[tuple[str, int]]:
+    """Identifica cada trecho por (arquivo, posição dentro do arquivo).
+
+    Por que posição DENTRO do arquivo, e não na lista inteira: a chave entra
+    nos metadados e, portanto, no hash da Indexing API. Com a posição global,
+    editar o primeiro arquivo deslocaria a posição de todos os trechos dos
+    arquivos seguintes, e todos seriam "novos" (embeddings refeitos à toa).
+    Assim, só os trechos do arquivo editado mudam.
+    """
+    contagem: Counter[str] = Counter()
+    chaves = []
+    for trecho in trechos:
+        chaves.append((trecho.fonte, contagem[trecho.fonte]))
+        contagem[trecho.fonte] += 1
+    return chaves
 
 
 def listar_arquivos(
@@ -54,10 +114,14 @@ def listar_arquivos(
         FileNotFoundError: Se alguma fonte não existir.
     """
     raiz = config.RAIZ_PROJETO if raiz is None else raiz
+    # `set` evita duplicata quando uma pasta e um arquivo dentro dela são
+    # listados juntos nas fontes.
     achados: set[str] = set()
 
     for fonte in fontes:
         caminho = raiz / fonte
+        # Um arquivo explícito entra sem filtro de extensão; já os arquivos de
+        # dentro de uma pasta só entram se forem .md/.txt (RAG_EXTENSOES).
         if caminho.is_file():
             candidatos = [caminho]
         elif caminho.is_dir():
@@ -66,15 +130,22 @@ def listar_arquivos(
                 if c.is_file() and c.suffix.lower() in config.RAG_EXTENSOES
             ]
         else:
+            # Falhar alto: uma fonte com nome errado não pode virar uma base
+            # vazia em silêncio.
             raise FileNotFoundError(
                 f"Fonte do RAG não encontrada: {fonte} (procurada em {raiz})."
             )
 
         for c in candidatos:
             relativo = c.relative_to(raiz)
+            # Ignora ocultos em qualquer nível do caminho (.git, .venv, ...).
             if not any(parte.startswith(".") for parte in relativo.parts):
+                # as_posix(): sempre "/" como separador, para o nome (e o hash
+                # dos documentos) ser igual em Windows e Linux.
                 achados.add(relativo.as_posix())
 
+    # sorted: ordem estável. Sem isso a ordem dos trechos poderia mudar de uma
+    # execução para outra.
     return sorted(achados)
 
 
@@ -99,71 +170,84 @@ def ler_fontes(
     return conteudos
 
 
-def calcular_assinatura(conteudos: dict[str, str]) -> str:
-    """Impressão digital dos arquivos e dos parâmetros que mudam o índice."""
-    base = json.dumps(
-        {
-            "fontes": conteudos,
-            "tamanho_max": config.RAG_TAMANHO_MAX_TRECHO,
-            "sobreposicao": config.RAG_SOBREPOSICAO,
-            "modelo_embedding": config.MODELO_EMBEDDING,
-            "prefixo_documento": config.RAG_PREFIXO_DOCUMENTO,
-        },
+def assinatura_do_modelo() -> str:
+    """Hash curto de tudo que muda os vetores guardados (modelo e prefixo de documento).
+
+    Vira o nome da pasta do banco: outro modelo → outra pasta → índice novo.
+    O prefixo de CONSULTA não entra porque só afeta a pergunta, não o que foi
+    guardado. Os parâmetros de chunking também não: eles mudam o texto dos
+    trechos, e a Indexing API já percebe isso pelo hash de cada um.
+    """
+    dados = json.dumps(
+        {"modelo": config.MODELO_EMBEDDING, "prefixo_documento": config.RAG_PREFIXO_DOCUMENTO},
         sort_keys=True,
         ensure_ascii=False,
     )
-    return hashlib.sha256(base.encode("utf-8")).hexdigest()
+    return hashlib.sha256(dados.encode("utf-8")).hexdigest()[:16]
 
 
-def _gerar_vetores(
-    trechos: list[Trecho], usar_embeddings: bool | None
-) -> list[list[float]] | None:
-    """Gera os embeddings dos trechos, em lotes de config.RAG_LOTE_EMBEDDING.
+def _documentos(trechos: list[Trecho]) -> list[Document]:
+    """Converte os trechos em Documents do LangChain, o formato da Indexing API.
 
-    Args:
-        trechos: Trechos a vetorizar.
-        usar_embeddings: False não usa embeddings; True exige (propaga o erro
-            do Ollama); None tenta e, se o Ollama falhar, segue sem eles.
+    ``page_content`` é o que o modelo de embeddings recebe (título + texto).
+    Os metadados vão para o Chroma junto com o vetor e permitem, na busca,
+    achar o Trecho de origem (ver Indice.posicao).
     """
-    if usar_embeddings is False or not trechos:
-        return None
-
-    textos = [config.RAG_PREFIXO_DOCUMENTO + t.para_indexar for t in trechos]
-    lote = max(1, config.RAG_LOTE_EMBEDDING)
-    vetores: list[list[float]] = []
-    try:
-        for inicio in range(0, len(textos), lote):
-            vetores.extend(gerar_embeddings(textos[inicio:inicio + lote]))
-    except ErroLLM:
-        if usar_embeddings:
-            raise
-        return None
-    return vetores
+    return [
+        Document(
+            page_content=trecho.para_indexar,
+            metadata={"fonte": fonte, "posicao": posicao, "secao": trecho.secao},
+        )
+        for trecho, (fonte, posicao) in zip(trechos, _chaves(trechos))
+    ]
 
 
-def _ler_cache(arquivo: Path, assinatura: str) -> Indice | None:
-    """Devolve o índice salvo se ele for válido e atual; senão, None."""
-    try:
-        indice = Indice.model_validate_json(arquivo.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+def _sincronizar_banco(
+    nome: str, trechos: list[Trecho], embeddings: Embeddings, pasta_base: Path
+) -> tuple[BancoVetorial, dict[str, int]]:
+    """Deixa o Chroma da base igual aos trechos atuais, gerando só os embeddings que faltam.
 
-    if indice.assinatura != assinatura:
-        return None
-    if indice.embeddings is not None and len(indice.embeddings) != len(indice.trechos):
-        return None
-    return indice
+    Raises:
+        ErroLLM: Se o Ollama falhar ao gerar algum embedding.
+    """
+    assinatura = assinatura_do_modelo()
+    pasta = pasta_base / assinatura
 
+    # Pastas de outro modelo/prefixo são de vetores que não servem mais.
+    # (ignore_errors: no Windows um arquivo aberto não pode ser apagado; a
+    # pasta só fica sobrando, sem atrapalhar.)
+    if pasta_base.is_dir():
+        for outra in pasta_base.iterdir():
+            if outra.is_dir() and outra.name != assinatura:
+                shutil.rmtree(outra, ignore_errors=True)
 
-def _salvar_cache(arquivo: Path, indice: Indice) -> None:
-    """Salva o índice em disco. Falha de escrita não é erro: o índice só será refeito."""
-    temporario = arquivo.with_suffix(arquivo.suffix + ".tmp")
-    try:
-        arquivo.parent.mkdir(parents=True, exist_ok=True)
-        temporario.write_text(indice.model_dump_json(), encoding="utf-8")
-        os.replace(temporario, arquivo)
-    except OSError:
-        temporario.unlink(missing_ok=True)
+    banco = BancoVetorial(pasta / "chroma", embeddings)
+
+    # O RecordManager anota o hash e a data de cada documento indexado. O
+    # namespace separa registros de bancos diferentes que dividam o arquivo.
+    # URL.create monta o endereço do SQLite com segurança mesmo com espaços e
+    # acentos no caminho (o projeto fica em ".../2° Challenge/...").
+    registro = SQLRecordManager(
+        namespace=f"chroma/{nome}",
+        db_url=URL.create("sqlite", database=str(pasta / "registro.sqlite")),
+    )
+    registro.create_schema()   # cria a tabela se ainda não existir
+
+    resultado = index(
+        _documentos(trechos),
+        registro,
+        banco.vector_store,
+        # "full": tudo o que estava no banco e não veio nesta lista é apagado.
+        # Funciona porque sempre entregamos a base INTEIRA.
+        cleanup="full",
+        # Quantos documentos por vez vão ao banco (e portanto ao Ollama).
+        batch_size=max(1, config.RAG_LOTE_EMBEDDING),
+        # Algoritmo do hash que identifica cada documento. O padrão (SHA-1)
+        # funciona, mas emite um aviso de segurança a cada execução.
+        key_encoder="sha256",
+    )
+    # IndexingResult é um dict: num_added, num_updated, num_skipped, num_deleted.
+    return banco, dict(resultado)
 
 
 def construir_indice(
@@ -171,28 +255,32 @@ def construir_indice(
     usar_embeddings: bool | None = None,
     fontes: tuple[str, ...] | list[str] | None = None,
     raiz: Path | None = None,
-    arquivo_cache: Path | None = None,
+    pasta: Path | None = None,
+    embeddings: Embeddings | None = None,
 ) -> Indice:
-    """Monta o índice de uma base, reaproveitando a cópia em disco quando possível.
+    """Divide a base em trechos e sincroniza o banco vetorial dela.
 
     Args:
         nome: Nome da base (chave de config.RAG_BASES, ex.: "supervisor"). Dá
-            nome ao arquivo da cópia em disco.
-        usar_embeddings: None (padrão) tenta gerar os embeddings e, se o Ollama
-            ou o modelo não estiverem disponíveis, segue só com palavras-chave.
-            True exige os embeddings (levanta ErroLLM se falharem). False nunca
-            chama o Ollama.
+            nome à pasta do banco vetorial.
+        usar_embeddings: None (padrão) tenta sincronizar o banco vetorial e, se
+            o Ollama ou o modelo não estiverem disponíveis, segue só com
+            palavras-chave. True exige os embeddings (levanta ErroLLM se
+            falharem). False nunca chama o Ollama nem abre o banco.
         fontes: Arquivos/pastas a indexar (padrão: config.RAG_BASES[nome]).
         raiz: Pasta base das fontes (padrão: raiz do projeto).
-        arquivo_cache: Onde guardar a cópia (padrão:
-            config.PASTA_INDICES_RAG / "<nome>.json").
+        pasta: Onde guardar o banco (padrão: config.PASTA_INDICES_RAG / nome).
+        embeddings: Modelo de embeddings (padrão: llm_client.criar_embeddings()).
 
     Raises:
         ValueError: Se a base não existir em config.RAG_BASES (e as fontes não
-            forem informadas) ou se algum arquivo não estiver em UTF-8.
+            forem informadas), se algum arquivo não estiver em UTF-8 ou se os
+            parâmetros de chunking forem inválidos.
         FileNotFoundError: Se alguma fonte não existir.
         ErroLLM: Só com usar_embeddings=True e Ollama indisponível.
     """
+    # fontes/raiz/pasta/embeddings existem principalmente para testes (pasta
+    # temporária, embeddings falsos). No uso normal só se passa `nome`.
     if fontes is None:
         if nome not in config.RAG_BASES:
             raise ValueError(
@@ -200,33 +288,31 @@ def construir_indice(
                 f"Bases configuradas: {', '.join(config.RAG_BASES)}."
             )
         fontes = config.RAG_BASES[nome]
-    if arquivo_cache is None:
-        arquivo_cache = config.PASTA_INDICES_RAG / f"{nome}.json"
+    if pasta is None:
+        pasta = config.PASTA_INDICES_RAG / nome
 
-    conteudos = ler_fontes(fontes, raiz)
-    assinatura = calcular_assinatura(conteudos)
-
-    # 1. Cópia em disco válida: reaproveita. Se ela ficou sem embeddings (Ollama
-    #    estava fora) e agora eles são desejados, tenta gerar de novo.
-    indice = _ler_cache(arquivo_cache, assinatura)
-    if indice is not None:
-        if indice.embeddings is None and indice.trechos and usar_embeddings is not False:
-            vetores = _gerar_vetores(indice.trechos, usar_embeddings)
-            if vetores is not None:
-                indice = indice.model_copy(update={"embeddings": vetores})
-                _salvar_cache(arquivo_cache, indice)
-        return indice
-
-    # 2. Sem cópia válida: divide os arquivos e gera os embeddings.
+    # 1. Chunking: sempre, de todos os arquivos (é rápido). Um arquivo vira
+    #    vários Trechos, todos numa lista única, na ordem de ler_fontes.
     trechos = [
         trecho
-        for arquivo, conteudo in conteudos.items()
+        for arquivo, conteudo in ler_fontes(fontes, raiz).items()
         for trecho in dividir_texto(conteudo, arquivo)
     ]
-    indice = Indice(
-        assinatura=assinatura,
-        trechos=trechos,
-        embeddings=_gerar_vetores(trechos, usar_embeddings),
-    )
-    _salvar_cache(arquivo_cache, indice)
-    return indice
+
+    # 2. Sem embeddings pedidos, ou sem nada para indexar: só palavras-chave.
+    if usar_embeddings is False or not trechos:
+        return Indice(trechos)
+
+    # 3. Embeddings + armazenamento, pela Indexing API.
+    try:
+        if embeddings is None:
+            embeddings = criar_embeddings()
+        banco, estatisticas = _sincronizar_banco(nome, trechos, embeddings, pasta)
+    except ErroLLM:
+        if usar_embeddings:
+            raise
+        # Modo None: o Ollama falhou e isso NÃO derruba o sistema; o RAG segue
+        # só com BM25. Se a falha foi no meio, os lotes já gravados ficam
+        # registrados, e a próxima execução continua de onde parou.
+        return Indice(trechos)
+    return Indice(trechos, banco, estatisticas)

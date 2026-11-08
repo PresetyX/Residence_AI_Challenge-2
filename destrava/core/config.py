@@ -68,8 +68,9 @@ ARQUIVO_TOKEN_CALENDARIO = "token_calendar.json"
 RAIZ_PROJETO = Path(__file__).resolve().parents[2]
 ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / NOME_ARQUIVO_CREDENCIAIS
 
-# RAG: pasta com a cópia local do índice de cada base (um arquivo por agente),
-# reconstruída sozinha quando as fontes ou os parâmetros mudam. Está no .gitignore.
+# RAG: pasta do banco vetorial (Chroma) e dos registros da Indexing API de cada
+# base (uma subpasta por agente). Atualizada sozinha quando as fontes ou os
+# parâmetros mudam; pode ser apagada para recomeçar do zero. Está no .gitignore.
 PASTA_INDICES_RAG = RAIZ_PROJETO / ".rag_indices"
 
 
