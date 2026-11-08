@@ -22,9 +22,13 @@ Opções:
     --responder        gera a resposta com o LLM (precisa do Ollama com config.MODELO)
     -k N               quantos trechos usar (padrão: config.RAG_TOP_K)
 
-A primeira execução monta o índice e o salva em .rag_indices/ (ignorado pelo
-git). Ele é refeito sozinho quando os arquivos da base mudam. Base vazia é
-válida: o script diz que não há trechos.
+A primeira execução gera os embeddings de todos os trechos e os grava no
+Chroma, em .rag_indices/ (ignorado pelo git). Nas seguintes, a Indexing API do
+LangChain só gera os embeddings dos trechos novos ou alterados; o script mostra
+quantos foram adicionados, reaproveitados e apagados. Base vazia é válida: o
+script diz que não há trechos.
+
+Para medir a qualidade com notas (ragas), use scripts/avaliar_rag.py.
 """
 
 import argparse
@@ -68,7 +72,15 @@ def main() -> None:
 
     rag = Rag(args.base, usar_embeddings=False if args.sem_embeddings else None)
     modo = "palavras-chave + embeddings" if rag.usa_embeddings else "só palavras-chave"
-    print(f"Base '{args.base}': {rag.total_trechos} trechos, busca por {modo}.\n")
+    print(f"Base '{args.base}': {rag.total_trechos} trechos, busca por {modo}.")
+    estatisticas = rag.indice.estatisticas
+    if estatisticas:
+        print(
+            f"Indexação: {estatisticas['num_added']} trechos novos, "
+            f"{estatisticas['num_skipped']} reaproveitados, "
+            f"{estatisticas['num_deleted']} apagados."
+        )
+    print()
 
     if args.pergunta:
         mostrar(rag, " ".join(args.pergunta), args.k, args.prompt, args.responder)
