@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.core.llm_client import perguntar
 from destrava.prompts.planejador import PROMPT_PLANEJADOR
+from destrava.rag import obter_rag
 
 
 class Tarefa(BaseModel):
@@ -59,6 +60,11 @@ def remover_bloco_markdown(texto: str) -> str:
     return texto
 
 class AgentePlanejador:
+    def __init__(self, rag=None):
+        # O RAG pode ser injetado (testes). Sem ele, usa a base "planejador",
+        # criada só na primeira execução (indexar pode chamar o Ollama).
+        self._rag = rag
+
     def executar(self, projeto: str, prazo: str) -> dict:
         # Impede o envio de uma descrição ausente, de outro tipo ou só com espaços.
         if not isinstance(projeto, str) or not projeto.strip():
@@ -86,8 +92,15 @@ class AgentePlanejador:
             ensure_ascii=False,
         )
 
-        # Insere os dados nas instruções do planejador e consulta o modelo de IA.
-        prompt = PROMPT_PLANEJADOR.format(entrada=entrada)
+        # Busca na base do Planejador os trechos relevantes para o projeto e os
+        # encaixa na lacuna {contexto} do prompt, junto com a {entrada}.
+        # A descrição do projeto é a consulta feita ao RAG.
+        rag = self._rag or obter_rag("planejador")
+        prompt = rag.montar_prompt(
+            projeto.strip(),
+            template=PROMPT_PLANEJADOR,
+            entrada=entrada,
+        )
         resposta = perguntar(prompt)
 
         try:

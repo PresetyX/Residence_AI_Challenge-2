@@ -54,7 +54,7 @@ Todos os comandos são executados **na raiz do projeto**, com o ambiente virtual
 python cli.py
 ```
 
-Escolha o agente (`1` = visualizar, `2` = criar), cole um JSON e veja o JSON de resposta. Para encerrar, digite `sair`.
+Escolha o agente (`1` = visualizar, `2` = criar, `3` = planejador). Nos agentes `1` e `2`, cole um JSON e veja o JSON de resposta. No `3`, digite a descrição do projeto em texto livre e o prazo (`AAAA-MM-DD`; Enter usa daqui a 14 dias) e veja o plano de tarefas em JSON: ele usa o RAG e o modelo, então precisa do Ollama ligado (ver a seção Ollama) e pode demorar. Para encerrar, digite `sair`.
 
 Visualizar (devolve os horários livres; se `fim` for igual a `inicio`, o período vira o dia inteiro):
 
@@ -122,7 +122,7 @@ destrava/
 docs/          documentação técnica de cada agente e contrato JSON
 scripts/       scripts de teste manual
 tests/         testes automáticos (Google simulado)
-cli.py         linha de comando: cole um JSON e veja o JSON do agente
+cli.py         linha de comando: cole um JSON (visualizar, criar) ou descreva um projeto (planejador)
 ```
 
 ## Configuração
