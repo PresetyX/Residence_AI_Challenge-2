@@ -17,7 +17,9 @@ horário de config.FUSO. O formato completo está em docs/contrato.md.
 
     3 planejador  entrada: a descrição do projeto em texto livre e o prazo
                            (AAAA-MM-DD; Enter usa daqui a 14 dias)
-                  saída:   {"tarefas": [{"ordem", "titulo", "tipo", "dificuldade"}]}
+                  saída:   {"tarefas": [{"etapa", "titulo", "objetivo",
+                                         "entregaveis", "demonstracao",
+                                         "dependencia", "story_points"}]}
                   Usa o RAG (base do Planejador) e o LLM, então precisa do
                   Ollama ligado e pode levar alguns minutos.
 

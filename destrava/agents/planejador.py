@@ -1,8 +1,6 @@
 # Converte os dados enviados ao modelo e a resposta dele para o formato JSON.
 import json
 from datetime import date
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.core.llm_client import perguntar
@@ -15,21 +13,22 @@ class Tarefa(BaseModel):
     # rejeitados e os valores devem ter os tipos esperados, sem conversão automática.
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    # A ordem deve ser positiva e o título deve ter pelo menos um caractere.
-    ordem: int = Field(ge=1)
+    # A etapa deve ser positiva; a sequência 1..N é conferida no agente.
+    etapa: int = Field(ge=1)
+    # Os campos de texto devem ter pelo menos um caractere.
     titulo: str = Field(min_length=1)
-    # Literal limita a categoria da tarefa aos valores listados abaixo.
-    tipo: Literal[
-        "requisitos",
-        "interface",
-        "banco_de_dados",
-        "backend",
-        "frontend",
-        "testes",
-        "documentacao",
-    ]
-    # A dificuldade aceita apenas inteiros de 1 (baixa) a 3 (alta).
-    dificuldade: int = Field(ge=1, le=3)
+    objetivo: str = Field(min_length=1)
+    entregaveis: str = Field(min_length=1)
+    demonstracao: str = Field(min_length=1)
+    # A etapa de uma tarefa anterior, ou 0 quando a tarefa não depende de nenhuma.
+    # Que ela aponte para uma etapa anterior é conferido no agente.
+    dependencia: int = Field(ge=0)
+    # O esforço estimado da tarefa, em story points.
+    story_points: int = Field(ge=1)
+
+
+# Campos de texto da tarefa que não podem ficar só com espaços.
+CAMPOS_TEXTO = ("titulo", "objetivo", "entregaveis", "demonstracao")
 
 
 class Plano(BaseModel):
@@ -37,6 +36,10 @@ class Plano(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     tarefas: list[Tarefa] = Field(min_length=1)
+
+
+# JSON Schema do Plano, gerado pelo Pydantic e enviado ao Ollama como `format`.
+ESQUEMA_PLANO = Plano.model_json_schema()
 
 
 class ErroPlanejador(ValueError):
@@ -101,7 +104,11 @@ class AgentePlanejador:
             template=PROMPT_PLANEJADOR,
             entrada=entrada,
         )
-        resposta = perguntar(prompt)
+        # O esquema do Plano vai como `format` para o Ollama: a resposta já sai
+        # como JSON com a chave "tarefas" e os sete campos de cada tarefa.
+        # As regras que o esquema não cobre (etapas de 1 a N, dependência
+        # anterior, textos só com espaços) continuam sendo conferidas abaixo.
+        resposta = perguntar(prompt, formato=ESQUEMA_PLANO)
 
         try:
           
@@ -111,17 +118,29 @@ class AgentePlanejador:
 
             # Confere se a lista já está numerada de 1 até N, sem saltos,
             # repetições ou tarefas fora de ordem. Não reordena a resposta.
-            ordens = [tarefa.ordem for tarefa in plano.tarefas]
+            etapas = [tarefa.etapa for tarefa in plano.tarefas]
             esperado = list(range(1, len(plano.tarefas) + 1))
 
-            if ordens != esperado:
+            if etapas != esperado:
                 raise ValueError(
-                    "As tarefas devem estar ordenadas de 1 até N."
+                    "As etapas devem estar numeradas de 1 até N."
                 )
 
-            # min_length não rejeita espaços sozinhos; esta checagem cobre esse caso.
-            if any(not tarefa.titulo.strip() for tarefa in plano.tarefas):
-                raise ValueError("Uma tarefa possui título vazio.")
+            for tarefa in plano.tarefas:
+                # min_length não rejeita espaços sozinhos; esta checagem cobre esse caso.
+                for campo in CAMPOS_TEXTO:
+                    if not getattr(tarefa, campo).strip():
+                        raise ValueError(
+                            f"A etapa {tarefa.etapa} possui {campo} vazio."
+                        )
+
+                # Uma tarefa só pode depender de uma etapa anterior a ela
+                # (0 = sem dependência). Isso também impede ciclos.
+                if tarefa.dependencia >= tarefa.etapa:
+                    raise ValueError(
+                        f"A etapa {tarefa.etapa} depende da etapa "
+                        f"{tarefa.dependencia}, que não é anterior a ela."
+                    )
 
         except (ValueError, ValidationError) as erro:
             raise ErroPlanejador(
