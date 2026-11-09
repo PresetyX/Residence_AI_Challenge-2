@@ -908,6 +908,10 @@ def test_perguntar_com_ollama_fora_levanta_erro_llm():
 def test_criar_chat_usa_o_modelo_do_config_e_valida_a_configuracao(monkeypatch):
     chat = llm_client.criar_chat()
     assert chat.model == config.MODELO and chat.base_url == config.OLLAMA_URL
+    assert chat.format is None
+
+    esquema = {"type": "object", "properties": {"x": {"type": "integer"}}}
+    assert llm_client.criar_chat(esquema).format == esquema
 
     monkeypatch.setattr(config, "MODELO", "  ")
     with pytest.raises(ErroLLM, match="MODELO"):

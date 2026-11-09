@@ -9,9 +9,10 @@ retorna o texto gerado ou os vetores (embeddings).
 endereço, tempo limite e tratamento de erros ficam num lugar só.
 
 Interface pública:
-    perguntar(prompt: str) -> str
+    perguntar(prompt: str, formato=None) -> str
         Envia um prompt e devolve a resposta (atalho para quem não usa LCEL).
-    criar_chat() -> ChatOllama
+        ``formato`` (um JSON Schema) obriga a resposta a seguir esse esquema.
+    criar_chat(formato=None) -> ChatOllama
         O modelo de chat do LangChain, pronto para entrar numa cadeia LCEL
         (``prompt | criar_chat() | StrOutputParser()``).
     criar_embeddings() -> EmbeddingsOllama
@@ -153,8 +154,14 @@ def traduzir_erros(modelo: str) -> Generator[None, None, None]:
 # ----------------------------------------------------------------- chat (LLM)
 
 
-def criar_chat() -> ChatOllama:
+def criar_chat(formato: dict | None = None) -> ChatOllama:
     """Cria o modelo de chat do LangChain com o modelo de config.MODELO.
+
+    Args:
+        formato: JSON Schema que a resposta deve seguir (saída estruturada do
+            Ollama). Com ele, o Ollama só deixa o modelo gerar um JSON que
+            caiba no esquema: sem Markdown, sem texto antes ou depois. None
+            (padrão) deixa a resposta livre.
 
     O objeto devolvido é um ``Runnable``: pode ser chamado direto
     (``chat.invoke("texto")``) ou encadeado com ``|`` numa cadeia LCEL.
@@ -164,15 +171,21 @@ def criar_chat() -> ChatOllama:
         ErroLLM: Se a configuração for inválida.
     """
     modelo, base_url, timeout = _ler_config("MODELO")
-    return ChatOllama(model=modelo, base_url=base_url, client_kwargs={"timeout": timeout})
+    return ChatOllama(
+        model=modelo,
+        base_url=base_url,
+        client_kwargs={"timeout": timeout},
+        format=formato,
+    )
 
 
-def perguntar(prompt: str) -> str:
+def perguntar(prompt: str, formato: dict | None = None) -> str:
     """
     Envia um prompt ao modelo definido em config.py, via Ollama.
 
     Args:
         prompt: Instruções e contexto preparados pelo agente.
+        formato: JSON Schema que a resposta deve seguir (ver criar_chat).
 
     Returns:
         Texto gerado pelo modelo.
@@ -192,7 +205,7 @@ def perguntar(prompt: str) -> str:
     # 2. Cria o chat e envia. Um texto puro vira uma única mensagem do
     #    usuário ("human"). Isso importa para o Gemma 2, que não tem papel
     #    "system": todas as instruções já vêm dentro do próprio prompt.
-    chat = criar_chat()
+    chat = criar_chat(formato)
     with traduzir_erros(config.MODELO):
         mensagem = chat.invoke(prompt)
 
