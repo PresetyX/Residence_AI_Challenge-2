@@ -1,48 +1,26 @@
+"""Teste do contrato etapa/titulo com Planejador simulado."""
 import json
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 from destrava.agents.supervisor import AgenteSupervisor
+from destrava.core import config
 
 
 def main():
-
-    # 1. Criamos o Planejador simulado.
     planejador = MagicMock()
-
-    # 2. Definimos o que ele vai devolver.
     planejador.executar.return_value = {
         "tarefas": [
-            {
-                "ordem": 1,
-                "titulo": "Criar estrutura HTML",
-                "tipo": "frontend",
-                "dificuldade": 1
-            },
-            {
-                "ordem": 2,
-                "titulo": "Estilizar pagina com CSS",
-                "tipo": "frontend",
-                "dificuldade": 2
-            },
-            {
-                "ordem": 3,
-                "titulo": "Testar o site",
-                "tipo": "testes",
-                "dificuldade": 1
-            }
+            {"etapa": 0, "titulo": "Criar estrutura HTML"},
+            {"etapa": 1, "titulo": "Estilizar pagina com CSS"},
+            {"etapa": 2, "titulo": "Testar o site"},
         ]
     }
 
-    # 3. Entregamos o mock ao Supervisor.
     supervisor = AgenteSupervisor(planejador=planejador)
+    prazo = (datetime.now(config.FUSO).date() + timedelta(days=7)).isoformat()
+    resposta = supervisor.receber_planejamento("Desenvolver um site", prazo)
 
-    # 4. O Supervisor solicita as tarefas.
-    resposta = supervisor.receber_planejamento(
-        projeto="Desenvolver um site",
-        prazo="2026-11-20"
-    )
-
-    # 5. Mostramos o resultado.
     print(json.dumps(resposta, indent=2, ensure_ascii=False))
 
 

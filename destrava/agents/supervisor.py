@@ -21,20 +21,8 @@ class InterpretacaoSupervisor(BaseModel):
 class TarefaPlanejador(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    ordem: int = Field(ge=1)
+    etapa: int = Field(ge=0)
     titulo: str = Field(min_length=1)
-
-    tipo: Literal[
-        "requisitos",
-        "interface",
-        "banco_de_dados",
-        "backend",
-        "frontend",
-        "testes",
-        "documentacao"
-    ]
-
-    dificuldade: int = Field(ge=1, le=3)
 
 
 class RespostaPlanejador(BaseModel):
@@ -86,6 +74,10 @@ class AgenteSupervisor:
         self.planejador = planejador
         self.evento_pendente = None
 
+        self.cronograma_pendente = None
+
+
+    
     
     def receber_planejamento(self, projeto: str, prazo: str) -> dict:
         """Recebe e valida as subtarefas devolvidas pelo Planejador."""
@@ -122,11 +114,10 @@ class AgenteSupervisor:
 
             plano = RespostaPlanejador.model_validate(resposta)
 
-            tarefas = plano.tarefas
-            ordens = [tarefa.ordem for tarefa in tarefas]
-
-            if ordens != list(range(1, len(tarefas) + 1)):
-                raise ValueError("A ordem das tarefas é inválida.")
+            tarefas = sorted(
+                plano.tarefas,
+                key=lambda tarefa: tarefa.etapa
+            )
 
             if any(not tarefa.titulo.strip() for tarefa in tarefas):
                 raise ValueError("Existe uma tarefa com título vazio.")
@@ -152,7 +143,7 @@ class AgenteSupervisor:
             "dados": {
                 "projeto": projeto.strip(),
                 "prazo": prazo,
-                "tarefas": plano.model_dump()["tarefas"]
+                "tarefas": [tarefa.model_dump() for tarefa in tarefas]
             }
         }
 
