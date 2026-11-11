@@ -67,8 +67,35 @@ class ErroLLM(RuntimeError):
 # ------------------------------------------------------------ configuração
 
 
+def _client_kwargs(timeout: httpx.Timeout) -> dict:
+    """Argumentos do cliente httpx do Ollama: tempo limite e, se houver, a chave.
+
+    O Ollama não confere chave nenhuma; o cabeçalho só tem efeito se o Ollama do
+    servidor de IA estiver atrás de um proxy que o exija (ver README).
+    """
+    kwargs: dict = {"timeout": timeout}
+    if config.CHAVE_API_IA:
+        kwargs["headers"] = {"Authorization": f"Bearer {config.CHAVE_API_IA}"}
+    return kwargs
+
+
+def _ler_num_ctx() -> int:
+    """Janela de contexto pedida ao Ollama (config.NUM_CTX).
+
+    Raises:
+        ErroLLM: Se NUM_CTX não for um inteiro positivo.
+    """
+    num_ctx = config.NUM_CTX
+    if isinstance(num_ctx, bool) or not isinstance(num_ctx, int) or num_ctx <= 0:
+        raise ErroLLM("NUM_CTX deve ser um inteiro positivo (config.py ou variável de ambiente).")
+    return num_ctx
+
+
 def _ler_config(nome_modelo: str) -> tuple[str, str, httpx.Timeout]:
     """Lê e valida modelo, endereço e tempo limite do config.py.
+
+    Os três podem vir de variáveis de ambiente (MODELO, MODELO_EMBEDDING,
+    OLLAMA_URL, TIMEOUT_LLM): o config.py já as lê na importação.
 
     Args:
         nome_modelo: Nome da constante do config com o modelo ("MODELO" ou
@@ -136,7 +163,9 @@ def traduzir_erros(modelo: str) -> Generator[None, None, None]:
         # transporte do httpx; a mensagem aqui é mais útil.
         raise ErroLLM(
             "O Ollama excedeu o tempo limite de conexão ou resposta. Verifique o "
-            "serviço e, se necessário, aumente TIMEOUT_LLM em config.py."
+            "serviço e, se necessário, aumente TIMEOUT_LLM (variável de ambiente "
+            "ou config.py). Com o servidor de IA compartilhado, o pedido pode "
+            "estar na fila atrás de outras pessoas."
         ) from exc
     except (ConnectionError, httpx.ConnectError) as exc:
         # Servidor desligado: o cliente do Ollama às vezes levanta o
@@ -144,7 +173,8 @@ def traduzir_erros(modelo: str) -> Generator[None, None, None]:
         # a chamada ser em streaming ou não). Os dois significam o mesmo.
         raise ErroLLM(
             f"Não foi possível conectar ao Ollama em {config.OLLAMA_URL}. "
-            "Verifique se o serviço está em execução."
+            "Verifique se o serviço está em execução e, se ele estiver em outro "
+            "PC, se a Tailscale está conectada e se OLLAMA_URL está certo."
         ) from exc
     except httpx.HTTPError as exc:
         # Qualquer outra falha de rede (rede caiu no meio da resposta etc.).
@@ -174,8 +204,11 @@ def criar_chat(formato: dict | None = None) -> ChatOllama:
     return ChatOllama(
         model=modelo,
         base_url=base_url,
-        client_kwargs={"timeout": timeout},
+        client_kwargs=_client_kwargs(timeout),
         format=formato,
+        # Explícito porque o padrão do Ollama (~4096 tokens) pode cortar o
+        # prompt do Planejador (regras + trechos do RAG) sem avisar.
+        num_ctx=_ler_num_ctx(),
     )
 
 
@@ -273,7 +306,7 @@ class EmbeddingsOllama(Embeddings):
             modelo, base_url, timeout = _ler_config("MODELO_EMBEDDING")
             # Criar o OllamaEmbeddings não contata o Ollama; só embed_* contata.
             base = OllamaEmbeddings(
-                model=modelo, base_url=base_url, client_kwargs={"timeout": timeout}
+                model=modelo, base_url=base_url, client_kwargs=_client_kwargs(timeout)
             )
         self.base = base
         # Nome do modelo, só para as mensagens de erro (um falso pode não ter).

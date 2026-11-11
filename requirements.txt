@@ -27,7 +27,10 @@ langchain-community==0.4.1
 # Backend
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.34,<1.0
-sentence-transformers>=3.0,<6.0
-torch>=2.6,<3.0
-scikit-learn>=1.5,<2.0
+httpx>=0.27,<1.0                   # cliente do serviço de story points (backend/story_points.py)
 numpy>=2.0,<2.5
+
+# Estas são as dependências leves: bastam para o notebook que usa o servidor de
+# IA (OLLAMA_URL e STORY_POINTS_URL apontando para o PC com a GPU).
+# torch e sentence-transformers ficam em requirements-ia.txt: só o servidor de IA,
+# ou quem roda tudo na própria máquina, instala.

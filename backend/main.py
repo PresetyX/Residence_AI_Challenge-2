@@ -7,14 +7,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, field_validator
 import uvicorn
 
-from backend.story_points import StoryPointsPredictor
+from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
+from destrava.core import config
 from destrava.rag import obter_rag
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.story_points_predictor = StoryPointsPredictor()
+    # Com STORY_POINTS_URL definido, o estimador é só um cliente HTTP do
+    # servidor de IA: nada de torch nem de BGE-M3 nesta máquina. Sem ele, o
+    # modelo é carregado aqui (modo local, requirements-ia.txt).
+    app.state.story_points_predictor = criar_estimador()
+    modo = f"remoto ({config.STORY_POINTS_URL})" if config.STORY_POINTS_URL else "local"
+    print(f"Story points: modo {modo}. LLM: {config.MODELO} em {config.OLLAMA_URL}.")
     app.state.planejador = AgentePlanejador(rag=obter_rag("planejador"))
     yield
 
@@ -159,10 +165,16 @@ def criar_projeto(
     ]
     print(json.dumps(plano, ensure_ascii=False, indent=2))
     print("Estimando duração das tarefas...")
-    predictor: StoryPointsPredictor = request.app.state.story_points_predictor
-    for tarefa in plano["tarefas"]:
-        tarefa["story_points"] = predictor.prever(tarefa)
+    predictor: EstimadorStoryPoints = request.app.state.story_points_predictor
+    try:
+        # Um pedido só para o plano inteiro (no modo remoto, uma ida à rede).
+        estimativas = predictor.prever_lote(plano["tarefas"])
+    except ErroStoryPoints as erro:
+        # Servidor de IA fora do ar, chave recusada etc.
+        raise HTTPException(status_code=503, detail=str(erro)) from erro
+    for tarefa, story_points in zip(plano["tarefas"], estimativas):
+        tarefa["story_points"] = story_points
         print(f"Estimativa para a tarefa {tarefa['etapa']}: {tarefa['story_points']} story points")
-    
+
 
     return {"prazo": projeto.prazo, "tarefas": plano["tarefas"]}
