@@ -33,6 +33,13 @@ O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](do
    pip install -r requirements.txt
    ```
 
+   Isso basta para quem usa o [servidor de IA compartilhado](#servidor-de-ia-compartilhado): nada de torch nem de modelos baixados.
+   Para rodar a IA na própria máquina (Ollama local e story points sem `STORY_POINTS_URL`), instale também as dependências pesadas:
+
+   ```
+   pip install -r requirements.txt -r requirements-ia.txt
+   ```
+
 ## Credenciais do Google
 
 1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto e ative a **Google Calendar API**.
@@ -85,6 +92,9 @@ imprime um resumo no terminal e retorna o prazo e as tarefas em JSON.
 Depois do Planejador, os textos de cada tarefa passam pelo embedding
 multilíngue BGE-M3 e pelo modelo PyTorch treinado. O valor original de
 `story_points` é descartado e substituído pela previsão da rede neural.
+Com `STORY_POINTS_URL` definido, essa etapa roda no servidor de IA (ver
+[Servidor de IA compartilhado](#servidor-de-ia-compartilhado)); se ele estiver
+fora do ar, `POST /projetos` responde `503` com o motivo em `detail`.
 Coloque o artefato exportado pelo notebook em `modelos/rede_neural.pt`. Ele
 deve conter o `state_dict` da MLP, a PCA e o `StandardScaler` usados no treino.
 
@@ -142,7 +152,7 @@ Use `python -m` (e não `python scripts/arquivo.py`), senão aparece `ModuleNotF
 python -m pytest tests/
 ```
 
-Os testes simulam o Google e o Ollama, então não precisam de `credentials.json` nem do Ollama. A única exceção à internet: na primeira execução, o RAG baixa os dados do NLTK (stopwords e stemmer em português). Para baixar antes: `python -m nltk.downloader stopwords rslp`.
+Os testes simulam o Google e o Ollama, então não precisam de `credentials.json` nem do Ollama. Os do servidor de IA (`tests/test_servidor_ia.py`) simulam a rede e o modelo de story points, cobrindo o modo remoto e o local sem baixar o BGE-M3. A única exceção à internet: na primeira execução, o RAG baixa os dados do NLTK (stopwords e stemmer em português). Para baixar antes: `python -m nltk.downloader stopwords rslp`.
 
 ## Ollama (opcional, para o RAG)
 
@@ -154,6 +164,115 @@ ollama pull nomic-embed-text
 
 O nome do modelo de embeddings fica em `destrava/core/config.py` (`MODELO_EMBEDDING`). Os agentes de visualizar e criar não usam o Ollama.
 
+Quem usa o servidor de IA compartilhado não instala o Ollama: basta apontar `OLLAMA_URL` para ele (seção abaixo).
+
+## Servidor de IA compartilhado
+
+Toda a inferência pode rodar num único PC com GPU, que o time acessa pela rede (Tailscale) como se fosse uma LLM na nuvem. Os notebooks não baixam modelo nenhum nem instalam torch.
+
+| Onde | O que roda |
+|---|---|
+| **Servidor de IA** (PC com GPU) | Ollama (`gemma4:12b-it-q4_K_M` para o chat, `nomic-embed-text` para os embeddings do RAG) e o serviço de story points (BGE-M3 + `modelos/rede_neural.pt`) |
+| **Notebook de cada pessoa** | Frontend, backend FastAPI, RAG (Chroma + BM25, em CPU) e agentes do Google Agenda, com o `credentials.json` e os `token_*.json` da própria conta |
+
+O backend continua local porque o Google Agenda usa o OAuth de cada um: só as chamadas de IA vão para o servidor.
+
+### Variáveis de ambiente
+
+Todas são opcionais. Sem elas, vale o padrão do `destrava/core/config.py` (tudo local). Os endereços **não** vão para o código nem para o repositório: cada pessoa define as variáveis na própria máquina.
+
+| Variável | Padrão | Para que serve |
+|---|---|---|
+| `OLLAMA_URL` | `http://localhost:11434` | Endereço do Ollama (no time: `http://<ip-tailscale-do-servidor>:11434`) |
+| `MODELO` | `gemma2:2b` | Modelo de chat do Ollama (no servidor: `gemma4:12b-it-q4_K_M`) |
+| `MODELO_EMBEDDING` | `nomic-embed-text` | Modelo de embeddings do RAG |
+| `STORY_POINTS_URL` | vazio (modo local) | Endereço do serviço de story points (`http://<ip-tailscale-do-servidor>:8001`) |
+| `TIMEOUT_LLM` | `300` | Segundos de espera pela resposta do modelo. Com várias pessoas na mesma GPU os pedidos fazem fila: aumente se aparecer erro de tempo esgotado |
+| `TIMEOUT_STORY_POINTS` | `120` | Segundos de espera pelo serviço de story points |
+| `NUM_CTX` | `8192` | Janela de contexto pedida ao Ollama. O padrão do Ollama (~4096) pode cortar o prompt do Planejador. Use o mesmo valor em todo o time: um valor diferente faz o Ollama recarregar o modelo |
+| `CHAVE_API_IA` | vazio (desligada) | Chave compartilhada. No servidor, o serviço de story points passa a exigir o cabeçalho `X-API-Key`; no notebook, o backend envia esse cabeçalho |
+
+### 1. Preparar o servidor de IA (PC com a GPU)
+
+1. **Ollama.** Instale o [Ollama](https://ollama.com/download) e baixe os modelos:
+
+   ```
+   ollama pull gemma4:12b-it-q4_K_M
+   ollama pull nomic-embed-text
+   ```
+
+   O `gemma4:12b-it-q4_K_M` é o Gemma 4 12B em 4 bits (cerca de 7,4 GB; a tag `gemma4:12b` aponta para o mesmo arquivo).
+
+2. **Configurar o Ollama para atender a rede.** No PowerShell (vale para o seu usuário; feche o Ollama pelo ícone da bandeja e abra de novo depois):
+
+   ```
+   setx OLLAMA_HOST 0.0.0.0:11434
+   setx OLLAMA_NUM_PARALLEL 2
+   setx OLLAMA_MAX_LOADED_MODELS 2
+   setx OLLAMA_KEEP_ALIVE 30m
+   ```
+
+   - `OLLAMA_HOST=0.0.0.0:11434`: aceita conexões de outros PCs (o padrão só aceita a própria máquina). Quem limita o acesso é o firewall do passo 4.
+   - `OLLAMA_NUM_PARALLEL=2`: atende duas pessoas ao mesmo tempo; os demais pedidos esperam na fila. Cada pedido simultâneo reserva memória de contexto (`NUM_CTX`) na GPU: com 16 GB, 2 é seguro; teste 3 olhando o `nvidia-smi`.
+   - `OLLAMA_MAX_LOADED_MODELS=2`: mantém o modelo de chat e o de embeddings carregados juntos, sem trocar um pelo outro a cada pedido.
+   - `OLLAMA_KEEP_ALIVE=30m`: o modelo fica na GPU por 30 minutos depois do último uso, sem o atraso de recarregar a cada pedido (`-1` mantém para sempre).
+
+3. **Serviço de story points.** Na raiz do projeto, num ambiente virtual próprio. O torch com suporte a CUDA vem do índice do PyTorch (a RTX 50xx precisa do CUDA 12.8 ou mais novo):
+
+   ```
+   pip install torch --index-url https://download.pytorch.org/whl/cu128
+   pip install -r requirements.txt -r requirements-ia.txt
+   python -c "import torch; print(torch.cuda.is_available())"
+   uvicorn backend.servidor_story_points:app --host 0.0.0.0 --port 8001
+   ```
+
+   O último comando deixa o serviço rodando. Ele carrega o BGE-M3 e a rede neural **uma vez**, ao iniciar (na primeira vez o BGE-M3 é baixado, cerca de 2,3 GB), e atende:
+
+   - `GET /saude`: `{"status": "ok", "dispositivo": "cuda:0"}`. Se aparecer `cpu`, o torch instalado não tem CUDA.
+   - `POST /story-points` com `{"tarefas": [{"titulo", "objetivo", "entregaveis", "demonstracao"}, ...]}`: devolve `{"story_points": [...]}`, na mesma ordem.
+
+   Para exigir a chave (opcional), defina-a antes de iniciar: `$env:CHAVE_API_IA = "<uma-chave-longa-e-aleatória>"`. Gere uma com `python -c "import secrets; print(secrets.token_urlsafe(32))"` e passe ao time por um canal privado, nunca pelo repositório.
+
+4. **Rede: Tailscale + firewall.** O Ollama e o serviço de story points **não têm login**. Eles só podem ficar acessíveis pela Tailscale:
+
+   - Instale a [Tailscale](https://tailscale.com/download) no servidor e em cada notebook, todos na mesma rede (tailnet). Convide o time ou compartilhe o dispositivo do servidor pelo painel da Tailscale.
+   - Veja o IP do servidor na tailnet com `tailscale ip -4` (algo como `100.x.y.z`) ou use o nome do MagicDNS.
+   - Libere as duas portas **só para a faixa da Tailscale**. No PowerShell como administrador:
+
+     ```
+     New-NetFirewallRule -DisplayName "Destrava IA (Tailscale)" -Direction Inbound -Protocol TCP -LocalPort 11434,8001 -RemoteAddress 100.64.0.0/10,fd7a:115c:a1e0::/48 -Action Allow
+     ```
+
+   - **Não** faça port forward no roteador e não exponha as portas na internet.
+   - Para restringir ainda mais, use as ACLs da Tailscale e libere as portas `11434` e `8001` só para os membros do time.
+
+   Sobre a `CHAVE_API_IA`: ela protege o serviço de story points. O Ollama não confere chave nenhuma. O backend também envia `Authorization: Bearer <chave>` ao Ollama, mas isso só tem efeito se você colocar um proxy na frente dele (Caddy, nginx) que exija o cabeçalho. Sem proxy, quem protege o Ollama é a Tailscale com o firewall.
+
+### 2. Configurar o notebook do time
+
+1. Instale só as dependências leves: `pip install -r requirements.txt` (sem `requirements-ia.txt`).
+2. Instale e conecte a Tailscale na mesma tailnet do servidor e teste o acesso:
+
+   ```
+   curl http://<ip-tailscale-do-servidor>:11434/api/tags
+   curl http://<ip-tailscale-do-servidor>:8001/saude
+   ```
+
+3. Defina as variáveis de ambiente. Para a sessão atual do PowerShell:
+
+   ```
+   $env:OLLAMA_URL = "http://<ip-tailscale-do-servidor>:11434"
+   $env:STORY_POINTS_URL = "http://<ip-tailscale-do-servidor>:8001"
+   $env:MODELO = "gemma4:12b-it-q4_K_M"
+   $env:CHAVE_API_IA = "<a-chave-que-o-servidor-usa>"   # só se o servidor usar chave
+   ```
+
+   Para deixar fixo no Windows, use `setx NOME valor` e abra um terminal novo. No Linux/macOS, use `export NOME=valor` (ou coloque no `~/.bashrc`).
+
+4. Rode o backend e o frontend normalmente (seções "API FastAPI" e "Frontend"). Ao iniciar, o backend mostra `Story points: modo remoto (http://...:8001)`. O Google Agenda continua usando o `credentials.json` e os `token_*.json` da sua conta, na sua máquina.
+
+O índice do RAG (Chroma) é gerado na primeira execução com os embeddings do servidor e fica em `.rag_indices/` no notebook. Ele só é refeito quando a base de conhecimento ou o modelo de embeddings mudam.
+
 ## Problemas comuns
 
 | Mensagem ou sintoma | O que fazer |
@@ -163,12 +282,19 @@ O nome do modelo de embeddings fica em `destrava/core/config.py` (`MODELO_EMBEDD
 | `SSL: CERTIFICATE_VERIFY_FAILED` ao falar com o Google | A rede pode estar interceptando a conexão (ex.: Wi-Fi com login). Tente outra rede. Não desative a verificação de certificado. |
 | Erro de fuso horário no Windows (`ZoneInfo`) | Instale o pacote de fusos: `pip install tzdata` (já está no `requirements.txt`). |
 | Autorização do Google travada ou com conta errada | Apague o arquivo `token_readonly.json` (visualizar) ou `token_calendar.json` (criar) e rode de novo para autorizar novamente. |
+| "Não foi possível conectar ao Ollama em http://100..." | Confira se a Tailscale está conectada nos dois PCs, se o Ollama do servidor foi reiniciado com `OLLAMA_HOST=0.0.0.0:11434` e se a regra de firewall existe. |
+| "O Ollama excedeu o tempo limite" com o servidor compartilhado | A GPU está atendendo outras pessoas e o pedido ficou na fila. Aumente `TIMEOUT_LLM` (ex.: `600`) ou, no servidor, `OLLAMA_NUM_PARALLEL`. |
+| `503` "serviço de story points" no `POST /projetos` | O serviço da porta `8001` não está rodando no servidor, ou a Tailscale caiu. Teste com `curl http://<ip>:8001/saude`. |
+| "recusou a chave de API" | `CHAVE_API_IA` do notebook é diferente da do servidor. |
+| Ollama retorna HTTP 404 | O modelo de `MODELO` não foi baixado **no servidor** (`ollama pull ...` lá, não no notebook). |
 
 ## Estrutura
 
 ```
 backend/
-└── main.py    API FastAPI (POST /projetos)
+├── main.py                    API FastAPI (POST /projetos)
+├── story_points.py            estimativa de story points: local (torch) ou cliente HTTP do servidor de IA
+└── servidor_story_points.py   serviço de story points do servidor de IA (POST /story-points)
 frontend/      interface web Next.js (landing, chat, agenda)
 destrava/
 ├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
@@ -183,7 +309,7 @@ cli.py         linha de comando: cole um JSON (visualizar, criar) ou descreva um
 
 ## Configuração
 
-Fuso horário, horários de acordar e dormir, duração mínima de um horário livre e demais valores ficam em `destrava/core/config.py`.
+Fuso horário, horários de acordar e dormir, duração mínima de um horário livre e demais valores ficam em `destrava/core/config.py`. O que muda de máquina para máquina (endereço do servidor de IA, modelo, tempos limite e chave) também pode vir de variáveis de ambiente; ver [Servidor de IA compartilhado](#servidor-de-ia-compartilhado).
 
 Para conferir se a configuração carrega, na raiz do projeto:
 
