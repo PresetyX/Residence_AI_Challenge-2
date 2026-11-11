@@ -1,0 +1,85 @@
+# Servidor de IA do Destrava: Ollama + serviço de story points, os dois na GPU.
+#
+# Ligar (no PC com a GPU, na raiz do projeto):
+#     docker compose -f docker-compose.servidor-ia.yml up -d
+# Desligar (libera a GPU; os modelos continuam nos volumes):
+#     docker compose -f docker-compose.servidor-ia.yml down
+#
+# Na primeira subida, o serviço "baixar-modelos" baixa o modelo de chat e o de
+# embeddings para o volume do Ollama, e o de story points baixa o BGE-M3. Das
+# próximas vezes, tudo já está nos volumes.
+#
+# Variáveis opcionais (no terminal, antes do "up"; nada fica salvo no repositório):
+#     MODELO               modelo de chat (padrão: gemma4:12b-it-q4_K_M)
+#     CHAVE_API_IA         se definida, o serviço de story points exige X-API-Key
+#     IP_PUBLICACAO        interface onde as portas abrem (padrão: 0.0.0.0, todas;
+#                          use o IP da Tailscale para abrir só nela)
+#     OLLAMA_NUM_PARALLEL  pedidos atendidos ao mesmo tempo (padrão: 2)
+#
+# Segurança: Ollama e story points não têm login. Libere as portas 11434 e 8001
+# só para a faixa da Tailscale no firewall e não faça port forward (ver README).
+
+name: destrava-ia
+
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all
+            capabilities: [gpu]
+
+services:
+  ollama:
+    image: ollama/ollama:0.35.1
+    <<: *gpu
+    ports:
+      - "${IP_PUBLICACAO:-0.0.0.0}:11434:11434"
+    environment:
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      # Chat e embeddings carregados juntos, sem trocar um pelo outro.
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      # O modelo fica na GPU por 30 min depois do último pedido.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      # Mesmo valor do NUM_CTX do backend: um num_ctx diferente faria o Ollama
+      # recarregar o modelo.
+      OLLAMA_CONTEXT_LENGTH: "8192"
+    volumes:
+      - ollama-modelos:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: on-failure
+
+  # Roda uma vez a cada "up": baixa o que faltar e termina (já baixado: segundos).
+  baixar-modelos:
+    image: ollama/ollama:0.35.1
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MODELO: ${MODELO:-gemma4:12b-it-q4_K_M}
+    entrypoint: ["sh", "-c", "ollama pull \"$$MODELO\" && ollama pull nomic-embed-text"]
+    restart: "no"
+
+  story-points:
+    build:
+      context: .
+      dockerfile: docker/story-points.Dockerfile
+    image: destrava/story-points:local
+    <<: *gpu
+    ports:
+      - "${IP_PUBLICACAO:-0.0.0.0}:8001:8001"
+    environment:
+      CHAVE_API_IA: ${CHAVE_API_IA:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    restart: on-failure
+
+volumes:
+  ollama-modelos:
+  hf-cache:
