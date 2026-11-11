@@ -8,7 +8,7 @@ import type {
 import { type EventDto, toCalendarEvent } from "./contracts";
 import { API_BASE_URL, ApiError, USE_MOCKS } from "./http";
 import { mockStreamChat } from "./mocks/mock-supervisor";
-import { isProjectMessage, projectPlannerStream } from "./project-planner";
+import { projectPlannerStream, routeToProjectPlanner } from "./project-planner";
 
 export interface InferenceMessage {
   role: MessageRole;
@@ -103,7 +103,7 @@ const supervisor: InferenceService = USE_MOCKS
 export const inferenceService: InferenceService = {
   async *streamChat(request, signal) {
     const last = [...request.messages].reverse().find((message) => message.role === "user");
-    if (last && isProjectMessage(last.content)) {
+    if (last && routeToProjectPlanner(last.content)) {
       yield* projectPlannerStream(last.content, signal);
       return;
     }

@@ -9,6 +9,12 @@
 import { formatLongDate } from "@/lib/format";
 import type { ProjectPlan } from "@/lib/types";
 import type { InferenceChunk } from "./inference-service";
+import {
+  mockHasPendingPlan,
+  mockSetPendingGoal,
+  parseGoal,
+  resetMockSupervisor,
+} from "./mocks/mock-supervisor";
 import { projectService } from "./project-service";
 
 /** Project described in an earlier turn, waiting for its deadline. */
@@ -95,12 +101,51 @@ const toIsoDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() +
 const isPast = (date: Date, now: Date) =>
   date < new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-/** Whether this message belongs to the project-planner flow. */
-export function isProjectMessage(text: string): boolean {
+/** "Quero desenvolver um app de controle de gastos pessoais" -> "App de controle de gastos pessoais". */
+function goalFromDescription(description: string): string {
+  const named = parseGoal(description);
+  if (named) return named;
+  const words = description
+    .replace(/^.*?\b(?:criar|desenvolver|construir|fazer|montar|lançar|lancar|entregar|programar|implementar|realizar)\s+/i, "")
+    .replace(/^(?:um|uma|o|a|meu|minha)\s+/i, "")
+    .replace(/[,.;:!?].*$/, "")
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Projeto";
+}
+
+/**
+ * Decides who answers this message: the backend planner (project + deadline) or the
+ * Supervisor (weekly focus blocks by free hours, refusals, free slots). The two flows
+ * share the conversation, so an open question in one of them wins over keywords:
+ *
+ *   - planner asked for the deadline and the user answers with free hours -> the user
+ *     chose weekly blocks: the project description becomes the Supervisor's goal;
+ *   - Supervisor asked for the goal (or the hours) -> its answer stays with it, even when
+ *     it says "projeto", unless the message brings a deadline.
+ */
+export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
-  if (pendingProject && parseDeadline(text)) return true;
-  if (SINGLE_ITEM.test(t) || HOURS.test(t)) return false;
-  return PROJECT.test(t);
+  const hasDeadline = parseDeadline(text) !== null;
+
+  if (pendingProject && hasDeadline) return true;
+  if (SINGLE_ITEM.test(t)) return false;
+
+  if (HOURS.test(t)) {
+    if (pendingProject) {
+      if (!parseGoal(text)) mockSetPendingGoal(goalFromDescription(pendingProject));
+      pendingProject = null;
+    }
+    return false;
+  }
+
+  if (mockHasPendingPlan() && !hasDeadline) return false;
+
+  if (!PROJECT.test(t)) return false;
+  // The planner takes over: forget any half-built weekly plan.
+  resetMockSupervisor();
+  return true;
 }
 
 /** Deadline at noon so the long date never slips a day across time zones. */

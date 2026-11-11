@@ -40,10 +40,23 @@ const WEEKDAYS = ["domingo", "segunda", "terca", "quarta", "quinta", "sexta", "s
 /** A goal or an hour budget mentioned in an earlier turn, waiting for its other half. */
 let pendingGoal: string | null = null;
 let pendingHours: number | null = null;
+/** Planning window ("nas próximas duas semanas") mentioned before the plan was complete. */
+let pendingDays: number | null = null;
 
 export function resetMockSupervisor(): void {
   pendingGoal = null;
   pendingHours = null;
+  pendingDays = null;
+}
+
+/** True while the Supervisor is waiting for the other half of a plan (goal or hours). */
+export function mockHasPendingPlan(): boolean {
+  return pendingGoal !== null || pendingHours !== null;
+}
+
+/** Hands over a goal the user already gave elsewhere in the conversation. */
+export function mockSetPendingGoal(goal: string): void {
+  pendingGoal = goal;
 }
 
 const normalize = (text: string) =>
@@ -89,7 +102,26 @@ function parseHours(text: string): HourBudget {
   };
 }
 
-function parseGoal(original: string): string | null {
+const WEEK_WORDS: Record<string, number> = { uma: 1, duas: 2, dois: 2, tres: 3, quatro: 4 };
+const DEFAULT_DAYS = 7;
+const MAX_DAYS = 28;
+
+/** "nas próximas duas semanas" -> 14; "nos próximos 10 dias" -> 10; "esta semana" -> 7. */
+function parseHorizonDays(text: string): number | undefined {
+  const weeks = text.match(/\b(\d|uma|duas|dois|tres|quatro)\s+semanas?\b/);
+  if (weeks) return Math.min((WEEK_WORDS[weeks[1]] ?? Number(weeks[1])) * 7, MAX_DAYS);
+  const days = text.match(/\b(\d{1,2})\s+dias\b/);
+  if (days) return Math.min(Math.max(Number(days[1]), 1), MAX_DAYS);
+  return undefined;
+}
+
+export function parseGoal(original: string): string | null {
+  // "projeto chamado DUAT", "no projeto DUAT", "projeto Nota Dez": a proper name after "projeto".
+  const projectName = original.match(
+    /\bprojeto\s+(?:chamad[oa]\s+|denominad[oa]\s+|intitulad[oa]\s+)?["“']?(\p{Lu}[\p{L}\d-]*(?:\s+\p{Lu}[\p{L}\d-]*){0,3})/u,
+  );
+  if (projectName) return projectName[1];
+
   const named = original.match(
     /\b(tcc|monografia|disserta[çc][ãa]o|tese|artigo|portf[óo]lio|relat[óo]rio)\b/i,
   );
@@ -128,7 +160,7 @@ function phaseName(index: number, count: number): string {
  * Candidate block starts for the next 7 days: evenings first (mornings on weekends),
  * then a second and third pass so bigger budgets still fit.
  */
-function candidateStarts(now: Date): Date[] {
+function candidateStarts(now: Date, days: number): Date[] {
   const passes: Array<{ weekday: number; weekend: number }> = [
     { weekday: 19, weekend: 9 },
     { weekday: 7, weekend: 14 },
@@ -136,7 +168,7 @@ function candidateStarts(now: Date): Date[] {
   ];
   const starts: Date[] = [];
   for (const pass of passes) {
-    for (let offset = 1; offset <= 7; offset++) {
+    for (let offset = 1; offset <= days; offset++) {
       const start = new Date(now);
       start.setDate(start.getDate() + offset);
       const isWeekend = start.getDay() === 0 || start.getDay() === 6;
@@ -156,9 +188,9 @@ const overlaps = (slot: Slot, event: Pick<CalendarEvent, "start" | "end">) =>
   slot.start.getTime() < Date.parse(event.end) && slot.end.getTime() > Date.parse(event.start);
 
 /** Picks `count` free 2-hour windows that do not collide with anything on the calendar. */
-function pickFreeSlots(count: number, busy: CalendarEvent[]): Slot[] {
+function pickFreeSlots(count: number, busy: CalendarEvent[], days = DEFAULT_DAYS): Slot[] {
   const picked: Slot[] = [];
-  for (const start of candidateStarts(new Date())) {
+  for (const start of candidateStarts(new Date(), days)) {
     if (picked.length === count) break;
     const slot = { start, end: new Date(start.getTime() + BLOCK_HOURS * HOUR_MS) };
     if (busy.some((event) => overlaps(slot, event))) continue;
@@ -202,10 +234,10 @@ async function findActivePlan(text: string): Promise<{ goal: string; events: Cal
   return { goal, events: planned.filter((event) => event.planGoal === goal) };
 }
 
-async function createPlan(goal: string, requestedHours: number): Promise<Reply> {
+async function createPlan(goal: string, requestedHours: number, days = DEFAULT_DAYS): Promise<Reply> {
   const hours = Math.min(requestedHours, MAX_PLAN_HOURS);
   const durations = splitIntoBlocks(hours);
-  const slots = pickFreeSlots(durations.length, await calendarService.listEvents()).sort(
+  const slots = pickFreeSlots(durations.length, await calendarService.listEvents(), days).sort(
     (a, b) => a.start.getTime() - b.start.getTime(),
   );
 
@@ -219,10 +251,11 @@ async function createPlan(goal: string, requestedHours: number): Promise<Reply> 
   );
   pendingGoal = null;
   pendingHours = null;
+  pendingDays = null;
 
   return {
     text: [
-      `Bora destravar **${goal}**! Dividi as suas **${hours} horas** em ${plural(events.length, "bloco de foco", "blocos de foco")} nos próximos 7 dias, sem conflito com o que já está na agenda.`,
+      `Bora destravar **${goal}**! Dividi as suas **${hours} horas** em ${plural(events.length, "bloco de foco", "blocos de foco")} nos próximos ${days} dias, sem conflito com o que já está na agenda.`,
       "",
       ...planTable(events),
       "",
@@ -458,29 +491,45 @@ async function buildReply(original: string, modelId: ModelId): Promise<Reply> {
 
   if (plan && hasBudget) return adaptPlan(plan, budget);
 
+  const days = parseHorizonDays(text) ?? pendingDays ?? DEFAULT_DAYS;
+
   if (PLANNING.test(text)) {
     const goal = parseGoal(original) ?? pendingGoal;
     const hours = budget.total ?? pendingHours;
     if (!goal) {
       pendingHours = hours;
+      pendingDays = days;
       return { text: "Bora! Qual é a meta ou o projeto que você quer destravar? Pode ser um TCC, uma prova, um projeto do trabalho…" };
     }
     if (!hours) {
       pendingGoal = goal;
-      return { text: `Fechado, vamos destravar **${goal}**. Quantas horas livres você tem esta semana para isso?` };
+      pendingDays = days;
+      return { text: `Fechado, vamos destravar **${goal}**. Quantas horas livres você tem para isso?` };
     }
-    return createPlan(goal, hours);
+    return createPlan(goal, hours, days);
+  }
+
+  // Answer to "which goal?" after the hours: "DUAT", "meu portfólio"... a short name is enough.
+  if (pendingHours !== null && budget.total === undefined) {
+    const shortAnswer = original.trim().replace(/[.!?]+$/, "");
+    const goal =
+      parseGoal(original) ??
+      (shortAnswer.split(/\s+/).length <= 4 && !DIRECT_VERB.test(text)
+        ? capitalize(shortAnswer.replace(/^(?:o|a|no|na|meu|minha|para o|para a)\s+/i, ""))
+        : null);
+    if (goal) return createPlan(goal, pendingHours, days);
   }
 
   // Answer to "how many hours do you have?": a bare number is enough.
   if (pendingGoal && budget.total === undefined) {
     const bare = text.match(/^\D*(\d{1,2})\s*(?:horas?|h)?\D*$/);
-    if (bare) return createPlan(pendingGoal, Number(bare[1]));
+    if (bare) return createPlan(pendingGoal, Number(bare[1]), days);
   }
 
   if (budget.total !== undefined) {
-    if (pendingGoal) return createPlan(pendingGoal, budget.total);
+    if (pendingGoal) return createPlan(pendingGoal, budget.total, days);
     pendingHours = budget.total;
+    pendingDays = days;
     return { text: `Boa, **${budget.total} horas** dá para avançar bastante. Em qual meta ou projeto você quer investir esse tempo?` };
   }
 
