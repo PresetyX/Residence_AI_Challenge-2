@@ -23,3 +23,11 @@ nltk==3.10.4                       # stopwords e stemmer RSLP (rag/texto.py)
 # as duas versões juntas. ragas<0.5 porque a 1.0 remove os wrappers do LangChain.
 ragas==0.4.3
 langchain-community==0.4.1
+
+# Backend
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+sentence-transformers>=3.0,<6.0
+torch>=2.6,<3.0
+scikit-learn>=1.5,<2.0
+numpy>=2.0,<2.5

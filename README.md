@@ -46,6 +46,44 @@ O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](do
 
 Todos os comandos são executados **na raiz do projeto**, com o ambiente virtual ativo.
 
+### API FastAPI
+
+Para iniciar o backend com a rota de template:
+
+```
+uvicorn backend.main:app
+```
+
+A rota `GET /` responde com `{}`.
+
+Para criar um projeto, envie o texto e o prazo para `POST /projetos`:
+
+```
+curl -X POST http://127.0.0.1:8000/projetos `
+  -H "Content-Type: application/json" `
+  -d '{"texto":"Criar uma API de cadastro de alunos.","prazo":"2026-12-01"}'
+```
+
+O backend valida os campos, executa o agente planejador com o prazo informado,
+imprime um resumo no terminal e retorna o prazo e as tarefas em JSON.
+
+Depois do Planejador, os textos de cada tarefa passam pelo embedding
+multilíngue BGE-M3 e pelo modelo PyTorch treinado. O valor original de
+`story_points` é descartado e substituído pela previsão da rede neural.
+Coloque o artefato exportado pelo notebook em `modelos/rede_neural.pt`. Ele
+deve conter o `state_dict` da MLP, a PCA e o `StandardScaler` usados no treino.
+
+Para treinar esse modelo com um CSV contendo `title`, `description` e
+`storypoint`:
+
+```
+python -m scripts.treinar_story_points joined_dataset.csv
+```
+
+O notebook segue o mesmo fluxo: limpa o texto, gera embeddings BGE-M3, ajusta
+a PCA e o `StandardScaler` somente no conjunto de treino, treina uma MLP e
+exporta tudo em `modelos/rede_neural.pt`.
+
 **Na primeira execução com o Google**, o navegador abre para você autorizar o acesso à agenda (leitura para o visualizar, escrita para o criar). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
 
 ### 1. CLI: os dois agentes (Google real)
@@ -114,6 +152,8 @@ O nome do modelo de embeddings fica em `destrava/core/config.py` (`MODELO_EMBEDD
 ## Estrutura
 
 ```
+backend/
+└── main.py    API FastAPI com a rota de template
 destrava/
 ├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
 ├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
