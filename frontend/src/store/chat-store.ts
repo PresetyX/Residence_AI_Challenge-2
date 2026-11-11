@@ -4,7 +4,8 @@ import { SYSTEM_PROMPT } from "@/lib/assistant-rules";
 import { createId } from "@/lib/format";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { ChatMessage, ModelId } from "@/lib/types";
-import { isAbortError } from "@/services/http";
+import { ApiError, isAbortError } from "@/services/http";
+import { resetProjectPlanner } from "@/services/project-planner";
 import { inferenceService } from "@/services/inference-service";
 import { useCalendarStore } from "./calendar-store";
 
@@ -85,6 +86,10 @@ export const useChatStore = create<ChatState>()(
                 patchMessage(reply.id, (message) => ({
                   calendarActions: [...(message.calendarActions ?? []), chunk.action],
                 }));
+              } else if (chunk.type === "status") {
+                patchMessage(reply.id, () => ({ statusText: chunk.value }));
+              } else if (chunk.type === "project_plan") {
+                patchMessage(reply.id, () => ({ projectPlan: chunk.plan }));
               } else {
                 patchMessage(reply.id, () => ({ suggestsManualPanel: true }));
               }
@@ -101,7 +106,9 @@ export const useChatStore = create<ChatState>()(
                 status: "error",
                 content:
                   message.content ||
-                  "Não consegui gerar uma resposta agora. Verifique sua conexão e tente novamente.",
+                  (error instanceof ApiError
+                    ? error.message
+                    : "Não consegui gerar uma resposta agora. Verifique sua conexão e tente novamente."),
               }));
             }
           } finally {
@@ -116,6 +123,7 @@ export const useChatStore = create<ChatState>()(
 
         resetConversation() {
           activeRequest?.abort();
+          resetProjectPlanner();
           set({ messages: [], isGenerating: false });
         },
       };

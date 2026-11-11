@@ -1,12 +1,14 @@
 import json
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, field_validator
 import uvicorn
 
 from backend.story_points import StoryPointsPredictor
-from destrava.agents.planejador import AgentePlanejador
+from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
 from destrava.rag import obter_rag
 
 
@@ -18,6 +20,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Residence AI Challenge", lifespan=lifespan)
+
+# Origens do frontend (Next.js) liberadas para chamar a API pelo navegador.
+# Sobrescreva com CORS_ORIGINS="http://exemplo.com,http://outro.com".
+CORS_ORIGINS = [
+    origem.strip()
+    for origem in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3210",
+    ).split(",")
+    if origem.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/")
+def raiz() -> dict[str, object]:
+    return {}
 
 
 class ProjetoRequest(BaseModel):
@@ -50,7 +75,20 @@ def criar_projeto(
 ) -> dict[str, object]:
     print("Planejando projeto: ", projeto.texto, "com prazo", projeto.prazo, "...")
     planejador: AgentePlanejador = request.app.state.planejador
-    plano = planejador.executar(projeto.texto, projeto.prazo)
+    try:
+        plano = planejador.executar(projeto.texto, projeto.prazo)
+    except ErroPlanejador as erro:
+        # A IA respondeu, mas fora do contrato esperado.
+        raise HTTPException(status_code=502, detail=str(erro)) from erro
+    except ValueError as erro:
+        # Entrada inválida (ex.: prazo fora do formato AAAA-MM-DD).
+        raise HTTPException(status_code=422, detail=str(erro)) from erro
+    except Exception as erro:
+        # Ollama fora do ar, modelo não baixado etc.
+        raise HTTPException(
+            status_code=503,
+            detail=f"O planejador não está disponível: {erro}",
+        ) from erro
 
     # plano = json.loads("""{
     # "tarefas": [

@@ -54,7 +54,22 @@ Para iniciar o backend com a rota de template:
 uvicorn backend.main:app
 ```
 
-A rota `GET /` responde com `{}`.
+A rota `GET /` responde com `{}`. O CORS libera o frontend em
+`http://localhost:3000` e `http://localhost:3210` (variável `CORS_ORIGINS`).
+Erros do planejador voltam como `422` (entrada inválida), `502` (resposta da IA
+fora do contrato) ou `503` (Ollama indisponível), com a mensagem em `detail`.
+
+### Frontend
+
+A interface web (Next.js) fica em [`frontend/`](frontend/README.md):
+
+```
+cd frontend
+npm install
+npm run dev
+```
+
+O chat chama `POST /projetos` quando o usuário descreve um projeto com prazo.
 
 Para criar um projeto, envie o texto e o prazo para `POST /projetos`:
 
@@ -153,7 +168,8 @@ O nome do modelo de embeddings fica em `destrava/core/config.py` (`MODELO_EMBEDD
 
 ```
 backend/
-└── main.py    API FastAPI com a rota de template
+└── main.py    API FastAPI (POST /projetos)
+frontend/      interface web Next.js (landing, chat, agenda)
 destrava/
 ├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
 ├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)

@@ -49,7 +49,21 @@ As regras ficam em `src/lib/assistant-rules.ts` (`SYSTEM_PROMPT`, enviado em tod
 
 `public/logo-mark.png` é o emblema como máscara branca com transparência; a cor e o brilho vêm do CSS (`.logo-mark` em `globals.css`). Para trocar a arte, substitua o PNG por outro branco com fundo transparente.
 
-## Conectando o backend
+## Integração com o backend (planejador de projetos)
+
+A rota que o backend já expõe é `POST /projetos` (`backend/main.py`). O chat usa essa rota quando a mensagem descreve um projeto com prazo:
+
+1. Suba o backend na raiz do repositório: `uvicorn backend.main:app` (precisa do Ollama com o modelo de `destrava/core/config.py` e do artefato `modelos/rede_neural.pt`).
+2. Rode o frontend (`npm run dev`). `NEXT_PUBLIC_USE_PLANNER_API` já vem ligado.
+3. No chat, escreva algo como *“Quero criar um app de controle de gastos, com prazo até 31/12/2026”*.
+
+O frontend envia `{ "texto": <mensagem>, "prazo": "AAAA-MM-DD" }` e mostra as etapas devolvidas em um cartão, com os story points estimados pela rede neural. Se faltar o prazo, o Destrava pergunta antes. Aceita `2026-12-31`, `31/12/2026`, `31/12`, `31 de dezembro`, `em 6 semanas` e `fim do ano`. O roteamento fica em `src/services/project-planner.ts` e a chamada HTTP em `src/services/project-service.ts`.
+
+Mensagens com horas livres (*“tenho 10 horas livres esta semana”*), comandos diretos e consultas de horários continuam no Supervisor mock.
+
+O backend libera CORS para `http://localhost:3000` e `http://localhost:3210`. Para outras origens, defina `CORS_ORIGINS`.
+
+## Conectando o restante do backend
 
 Copie `.env.example` para `.env.local` e ajuste:
 
@@ -68,7 +82,7 @@ Com `NEXT_PUBLIC_USE_MOCKS=false`, os serviços passam a chamar estes endpoints 
 
 Os tipos de `src/services/contracts.ts` espelham o contrato JSON dos agentes (`status`, `acao`, `dados`, `erro`...). Os campos `descricao` e `local` ainda não existem no backend e são opcionais.
 
-Esses endpoints são uma **proposta**: o backend hoje expõe os agentes via `executar_json`, sem API HTTP. Ajuste os caminhos nos serviços conforme a API for definida; os componentes não precisam mudar.
+Esses endpoints são uma **proposta**: com exceção de `POST /projetos`, o backend ainda não tem essas rotas HTTP. Ajuste os caminhos nos serviços conforme a API for definida; os componentes não precisam mudar.
 
 ## Antes de publicar
 

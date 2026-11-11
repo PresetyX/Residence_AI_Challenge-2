@@ -1,7 +1,14 @@
-import type { CalendarAction, CalendarActionType, MessageRole, ModelId } from "@/lib/types";
+import type {
+  CalendarAction,
+  CalendarActionType,
+  MessageRole,
+  ModelId,
+  ProjectPlan,
+} from "@/lib/types";
 import { type EventDto, toCalendarEvent } from "./contracts";
 import { API_BASE_URL, ApiError, USE_MOCKS } from "./http";
 import { mockStreamChat } from "./mocks/mock-supervisor";
+import { isProjectMessage, projectPlannerStream } from "./project-planner";
 
 export interface InferenceMessage {
   role: MessageRole;
@@ -20,7 +27,11 @@ export type InferenceChunk =
   /** One calendar mutation; a plan emits one chunk per slot it touched. */
   | { type: "calendar_action"; action: CalendarAction }
   /** The AI declined a direct command; the UI offers the manual panel instead. */
-  | { type: "suggest_manual_panel" };
+  | { type: "suggest_manual_panel" }
+  /** Progress note for slow backend work, shown until the first token arrives. */
+  | { type: "status"; value: string }
+  /** Project plan from POST /projetos. */
+  | { type: "project_plan"; plan: ProjectPlan };
 
 export interface InferenceService {
   /** Streams the assistant reply. Calendar mutations arrive as `calendar_action` chunks. */
@@ -84,6 +95,18 @@ const httpInferenceService: InferenceService = {
   },
 };
 
-export const inferenceService: InferenceService = USE_MOCKS
+const supervisor: InferenceService = USE_MOCKS
   ? { streamChat: mockStreamChat }
   : httpInferenceService;
+
+/** Project requests go to the backend planner; everything else to the Supervisor. */
+export const inferenceService: InferenceService = {
+  async *streamChat(request, signal) {
+    const last = [...request.messages].reverse().find((message) => message.role === "user");
+    if (last && isProjectMessage(last.content)) {
+      yield* projectPlannerStream(last.content, signal);
+      return;
+    }
+    yield* supervisor.streamChat(request, signal);
+  },
+};

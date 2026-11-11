@@ -18,13 +18,14 @@ interface Suggestion {
 const SUGGESTIONS: Suggestion[] = [
   {
     icon: Target,
-    title: "Destravar um projeto",
-    prompt: "Monte um plano para eu fazer meu TCC, tenho 10 horas livres esta semana",
+    title: "Planejar um projeto até o prazo",
+    prompt:
+      "Quero criar um projeto de inteligência artificial para análise de sentimentos em redes sociais, com prazo até 31/12/2026",
   },
   {
     icon: GraduationCap,
-    title: "Organizar os estudos",
-    prompt: "Organize meus estudos para a prova de cálculo, tenho 6 horas livres esta semana",
+    title: "Blocos de foco na semana",
+    prompt: "Monte um plano para eu fazer meu TCC, tenho 10 horas livres esta semana",
   },
   {
     icon: Eye,
@@ -72,7 +73,7 @@ export function EmptyState({ userFirstName }: { userFirstName: string }) {
         transition={{ delay: 0.18, duration: 0.5 }}
         className="mt-3 text-muted"
       >
-        Conte a meta e quanto tempo você tem. Eu transformo em blocos de foco na sua agenda.
+        Descreva o projeto e o prazo: eu divido em etapas com story points. Ou diga quantas horas livres tem e eu monto blocos de foco na agenda.
       </motion.p>
 
       <ul className="mt-9 grid w-full gap-3 text-left sm:grid-cols-2">

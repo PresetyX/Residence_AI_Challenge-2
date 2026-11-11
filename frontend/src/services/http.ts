@@ -9,6 +9,13 @@ export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost
 
 export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS !== "false";
 
+/**
+ * The project planner (POST /projetos) is the one backend route that exists today, so it
+ * has its own switch: on by default, even while auth, chat and calendar stay on mocks.
+ * Set NEXT_PUBLIC_USE_PLANNER_API=false to plan projects with the in-browser mock.
+ */
+export const USE_PLANNER_API = process.env.NEXT_PUBLIC_USE_PLANNER_API !== "false";
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -29,13 +36,35 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
   if (!response.ok) {
     throw new ApiError(
-      "Não foi possível concluir a solicitação. Tente novamente.",
+      (await readErrorDetail(response)) ??
+        "Não foi possível concluir a solicitação. Tente novamente.",
       "HttpError",
       response.status,
     );
   }
 
   return (response.status === 204 ? undefined : await response.json()) as T;
+}
+
+/**
+ * FastAPI errors come as { detail: "..." } (HTTPException) or
+ * { detail: [{ msg: "..." }] } (validation). Returns null when the body has neither.
+ */
+export async function readErrorDetail(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+    if (Array.isArray(body.detail)) {
+      const messages = body.detail
+        .map((item) => (item as { msg?: unknown })?.msg)
+        .filter((msg): msg is string => typeof msg === "string")
+        .map((msg) => msg.replace(/^Value error, /, ""));
+      if (messages.length) return messages.join(" ");
+    }
+  } catch {
+    // Not JSON: fall back to the generic message.
+  }
+  return null;
 }
 
 /** Simulated network latency for the mocks. Rejects with AbortError when aborted. */

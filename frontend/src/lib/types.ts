@@ -61,6 +61,27 @@ export interface CalendarAction {
   snapshot: CalendarEvent;
 }
 
+/** One step of a project plan returned by the backend planner (POST /projetos). */
+export interface ProjectTask {
+  step: number;
+  title: string;
+  goal: string;
+  deliverables: string;
+  demo: string;
+  /** Step this one depends on; 0 when it can start right away. */
+  dependsOn: number;
+  /** Effort estimated by the backend neural network. */
+  storyPoints: number;
+}
+
+export interface ProjectPlan {
+  /** What the user asked to plan, as sent to the backend. */
+  description: string;
+  /** Deadline as YYYY-MM-DD. */
+  deadline: string;
+  tasks: ProjectTask[];
+}
+
 export type MessageRole = "user" | "assistant";
 export type MessageStatus = "streaming" | "done" | "error";
 
@@ -75,4 +96,8 @@ export interface ChatMessage {
   calendarActions?: CalendarAction[];
   /** True when the AI declined a direct command and points the user to the manual panel. */
   suggestsManualPanel?: boolean;
+  /** Project plan produced by the backend planner in this turn. */
+  projectPlan?: ProjectPlan;
+  /** Progress note shown while the reply is still empty (long backend calls). */
+  statusText?: string;
 }

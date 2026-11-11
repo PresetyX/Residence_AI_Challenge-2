@@ -10,6 +10,7 @@ import { useUiStore } from "@/store/ui-store";
 import { CalendarEventCard } from "./calendar-event-card";
 import { CalendarPlanCard } from "./calendar-plan-card";
 import { Markdown } from "./markdown";
+import { ProjectPlanCard } from "./project-plan-card";
 
 export const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   return message.role === "user" ? (
@@ -71,7 +72,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         </p>
 
         {isThinking ? (
-          <ThinkingDots />
+          <ThinkingDots label={message.statusText} />
         ) : isError ? (
           <p
             role="alert"
@@ -103,6 +104,12 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           </div>
         )}
 
+        {message.projectPlan && (
+          <div className="mt-4">
+            <ProjectPlanCard plan={message.projectPlan} />
+          </div>
+        )}
+
         {message.suggestsManualPanel && message.status === "done" && (
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -121,10 +128,10 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
   );
 }
 
-function ThinkingDots() {
+function ThinkingDots({ label }: { label?: string }) {
   return (
-    <p className="flex h-7 items-center gap-1.5" role="status">
-      <span className="sr-only">O assistente está pensando…</span>
+    <p className="flex min-h-7 items-center gap-1.5" role="status">
+      <span className="sr-only">{label ?? "O assistente está pensando…"}</span>
       {[0, 1, 2].map((index) => (
         <motion.span
           key={index}
@@ -134,6 +141,11 @@ function ThinkingDots() {
           transition={{ duration: 1.1, repeat: Infinity, delay: index * 0.16 }}
         />
       ))}
+      {label && (
+        <span aria-hidden="true" className="ml-2 text-sm text-muted">
+          {label}
+        </span>
+      )}
     </p>
   );
 }
