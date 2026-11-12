@@ -5,6 +5,10 @@ token*.json
 # Variáveis de ambiente
 .env
 
+# Banco SQLite local
+data/
+*.sqlite3
+
 # Ambiente virtual
 .venv/
 

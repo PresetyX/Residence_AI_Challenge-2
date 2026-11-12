@@ -169,6 +169,29 @@ cli.py         linha de comando: cole um JSON (visualizar, criar) ou descreva um
 
 Fuso horário, horários de acordar e dormir, duração mínima de um horário livre e demais valores ficam em `destrava/core/config.py`.
 
+### Banco de dados SQLite
+
+O banco SQLite fica no arquivo `data/residence_ai.sqlite3` e possui as tabelas
+`usuarios`, `tarefas` e `historico_tarefas`. Usuários são identificados
+pelo identificador único fornecido pelo Google (`google_sub`); nenhuma senha é
+armazenada. A autenticação pelo Google será integrada posteriormente.
+A tabela de tarefas armazena `story_points` e `tempo_gasto_minutos`; ambos
+podem ficar nulos até que a estimativa ou a execução seja registrada.
+Também existe a tabela `historico_tarefas`, usada pela rota `POST /historico`
+para registrar `story_points` e `tempo_real_minutos`.
+
+1. Copie a configuração de `.env.example` para `.env`, ou configure
+   `DATABASE_URL=sqlite:///./data/residence_ai.sqlite3` no ambiente.
+2. Instale as dependências e inicialize as tabelas:
+
+   ```
+   python -m backend.database
+   ```
+
+Não é necessário baixar ou colocar `sqlite3.exe` no projeto: a aplicação usa o
+SQLite incluído no Python. O executável de linha de comando é opcional e, se
+for usado manualmente, pode ficar em qualquer pasta adicionada ao `PATH`.
+
 Para conferir se a configuração carrega, na raiz do projeto:
 
 ```
