@@ -1,39 +1,13 @@
 # Projeto: Sistema de Acompanhamento de Demandas de Desenvolvimento
-
-## Descrição
-Aplicação web, inspirada em ferramentas como GitHub Projects, para organizar tarefas, defeitos, melhorias e documentação de projetos de software. Cada projeto tem várias demandas, e cada demanda é acompanhada por status, prioridade, responsável, comentários e histórico de alterações.
-
-## Tipo / domínio
-Aplicação web de gestão de demandas. Frontend, API e banco de dados relacional integrados.
-
-## Tecnologias exigidas
-- Frontend: HTML5, CSS3, JavaScript (Bootstrap opcional)
-- Backend: Node.js (LTS) com TypeScript e Express
-- Banco de dados: relacional (MySQL ou Oracle)
-- Versionamento: Git e GitHub
-
-## Requisitos principais
-- Autenticação com três perfis: Administrador, Líder de Projeto e Membro da Equipe
-- Projetos e usuários podem ser inseridos previamente no banco (telas de cadastro dessas entidades são opcionais)
-- Demanda vinculada a um projeto, com título, descrição, tipo, prioridade, status, responsável (opcional na criação), data de criação, data da última atualização e prazo de finalização
-- Tipos: tarefa, defeito, melhoria, documentação
-- Prioridades: crítica, alta, média, baixa
-- Status: aberta, em andamento, em revisão, concluída, cancelada (toda demanda nasce "aberta")
-- Ciclo de vida: aberta → em andamento → em revisão → concluída; revisão pode voltar a em andamento; qualquer status (exceto concluída) pode ir para cancelada; não pode concluir direto de "em andamento" nem voltar de "em andamento" para "aberta"
-- Permissões por perfil: o Membro só move aberta → em andamento → em revisão nas demandas atribuídas a ele; as demais transições, prioridade e responsável ficam com Líder e Administrador
-- Proibida a exclusão física: demanda não usada mais é cancelada
-- Comentários vinculados a uma demanda e a um usuário, com data e hora
-- Histórico automático de alterações (status, responsável, prioridade, prazo, cancelamento), nunca apagado
-- Prazo de finalização validado por API externa de feriados nacionais (feriado bloqueia o cadastro ou a atualização do prazo)
-- Listagem, filtro por pelo menos dois critérios, busca textual por título ou descrição e ordenação
-- Dashboard com totais por status, prioridade e tipo, críticas em aberto e demandas próximas do prazo
+Tipo: App web CRUD
+Descrição: Aplicação web para organizar tarefas, defeitos, melhorias e documentação de projetos de software. Cada demanda é acompanhada por status, prioridade, responsável, comentários e histórico de alterações.
+Login na Etapa 1: sim — o escopo exige autenticação com perfis de acesso.
 
 ## Etapas
-As etapas abaixo são fatias verticais: cada uma atravessa as camadas necessárias (interface, regras e dados) e termina com algo que pode ser demonstrado e testado. A Etapa 1 é o esqueleto mínimo, a funcionalidade mais fina possível funcionando de ponta a ponta.
 
 ### Etapa 1 – Esqueleto: login de ponta a ponta
 - Objetivo: ter o ambiente e a primeira funcionalidade completa atravessando todas as camadas
-- Entregáveis: repositório com branches, backend Node.js/TypeScript/Express, conexão com o banco, tabelas de usuário e projeto com carga inicial de perfis e projetos, rota de login, tela de login e página inicial simples
+- Entregáveis: repositório com branches, backend, conexão com o banco, tabelas de usuário e projeto com carga inicial de perfis e projetos, rota de login, tela de login e página inicial simples
 - Demonstração: entrar com um usuário pré-cadastrado e ver a página inicial conforme o perfil
 - Dependências: nenhuma
 
@@ -75,7 +49,7 @@ As etapas abaixo são fatias verticais: cada uma atravessa as camadas necessári
 
 ### Etapa 8 – Prazo com validação de feriado
 - Objetivo: definir a data prevista de conclusão sem cair em feriado nacional
-- Entregáveis: campo de prazo, integração com API externa de feriados, mensagem de erro e bloqueio do cadastro ou da atualização quando for feriado
+- Entregáveis: campo de prazo, integração com serviço externo de feriados, mensagem de erro e bloqueio do cadastro ou da atualização quando for feriado
 - Demonstração: tentar salvar um prazo em feriado e ver a mensagem de erro, depois salvar uma data válida
 - Dependências: Etapa 3
 

@@ -1,64 +1,13 @@
 # Projeto: Sistema de Monitoramento de Sustentabilidade Pessoal
-
-## Descrição
-Sistema em Python que registra o dia a dia de uma pessoa (consumo de água, consumo de energia elétrica, resíduos não recicláveis, reciclagem e meio de transporte) e classifica a sustentabilidade de cada dia e das médias de vários dias. Os dados ficam em um banco de dados, e o usuário os manipula por um menu.
-
-## Tipo / domínio
-Aplicação de linha de comando com banco de dados relacional, regras de classificação, cálculo de médias, operações de CRUD e criptografia de dados.
-
-## Tecnologias exigidas
-- Linguagem: Python
-- Banco de dados: relacional, com conexão feita pelo sistema
-- Criptografia: método de álgebra linear aplicado aos dados
-- Versionamento: Git e GitHub
-
-## Requisitos principais
-
-### Dados de um monitoramento diário
-- Data
-- Litros de água consumidos no dia (aproximado)
-- kWh de energia elétrica consumidos no dia
-- kg de resíduos não recicláveis gerados no dia
-- Porcentagem de resíduos reciclados em relação ao total
-- Meio de transporte usado: transporte público, bicicleta, caminhada, carro a combustível fóssil, carro elétrico, carona compartilhada (podem ser acrescentados outros)
-
-### Regras de classificação
-| Indicador | Alta | Moderada | Baixa |
-|---|---|---|---|
-| Consumo de água | menos de 150 litros/dia | 150 a 200 litros/dia | mais de 200 litros/dia |
-| Consumo de energia elétrica | menos de 5 kWh/dia | 5 a 10 kWh/dia | mais de 10 kWh/dia |
-| Resíduos (pelo percentual reciclado) | mais de 50% reciclado | 20% a 50% reciclado | menos de 20% reciclado |
-| Transporte | bicicleta, transporte público ou elétrico | uso misto de público e privado | uso exclusivo de combustíveis fósseis |
-
-- A classificação por indicador deve ser mostrada junto com a **sustentabilidade geral** do dia
-- O sistema de ponderação do transporte (cada meio recebe um peso) e o da classificação geral são definidos pela equipe
-
-### Exemplo de saída esperada
-Entrada: data 24/3/2025, 180 litros de água, 6,5 kWh, 1,5 kg de resíduos não recicláveis, 60% reciclado, transporte por caminhada.
-Saída: água moderada, energia moderada, resíduos alta, transporte alta, sustentabilidade geral moderada.
-
-### Banco de dados e médias
-- Tabela criada manualmente, com os campos do monitoramento e outros que a equipe julgar úteis
-- O sistema conecta ao banco, lê todos os registros e calcula as médias de água, energia, resíduos não recicláveis, percentual reciclado e uso de transporte
-- A classificação geral é feita a partir das médias
-
-### Menu do sistema
-- Inserir dados de monitoramento
-- Alterar dados de monitoramento
-- Apagar dados de monitoramento
-- Listar cada monitoramento diário com sua classificação
-- Calcular e mostrar as médias dos parâmetros com a classificação
-- Sair do sistema
-
-### Criptografia
-- Os dados devem ser criptografados com um método de álgebra linear
+Tipo: App de terminal com banco
+Descrição: Sistema de linha de comando que registra o dia a dia de uma pessoa (água, energia, resíduos, reciclagem e transporte) e classifica a sustentabilidade de cada dia e das médias de vários dias. Os dados ficam em um banco de dados e são manipulados por um menu.
+Login na Etapa 1: não — é uma aplicação de terminal de uso pessoal; a Etapa 1 é a funcionalidade mínima de entrada, regra e saída.
 
 ## Etapas
-As etapas abaixo são fatias verticais: cada uma atravessa as camadas necessárias (interface, regras e dados) e termina com algo que pode ser demonstrado e testado. A Etapa 1 é o esqueleto mínimo, a funcionalidade mais fina possível funcionando de ponta a ponta.
 
 ### Etapa 1 – Esqueleto: um dia com a classificação da água
 - Objetivo: ter o ambiente e o caminho completo de entrada, regra e saída com o indicador mais simples
-- Entregáveis: ambiente Python, repositório com branches, leitura da data e dos litros de água com validação, classificação (alta, moderada ou baixa) e exibição
+- Entregáveis: ambiente de desenvolvimento, repositório com branches, leitura da data e dos litros de água com validação, classificação (alta, moderada ou baixa) e exibição
 - Demonstração: informar 180 litros e ver "moderada sustentabilidade"
 - Dependências: nenhuma
 
@@ -112,7 +61,7 @@ As etapas abaixo são fatias verticais: cada uma atravessa as camadas necessári
 
 ### Etapa 10 – Criptografia dos dados
 - Objetivo: proteger os dados armazenados
-- Entregáveis: algoritmo de álgebra linear (por exemplo, Cifra de Hill) com matriz-chave válida, cifra na gravação e decifra na leitura, em todas as opções do menu
+- Entregáveis: algoritmo de criptografia com chave válida, cifra na gravação e decifra na leitura, em todas as opções do menu
 - Demonstração: cadastrar um dia, ver os valores cifrados no banco e as telas continuarem mostrando os valores corretos
 - Dependências: Etapas 5 a 9
 
