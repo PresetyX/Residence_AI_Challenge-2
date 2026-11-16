@@ -176,6 +176,7 @@ def criar_chat(formato: dict | None = None) -> ChatOllama:
         base_url=base_url,
         client_kwargs={"timeout": timeout},
         format=formato,
+        num_ctx=8192,
     )
 
 
