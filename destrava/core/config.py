@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 
 # MODELO (usado pelo llm_client.py, via Ollama)
-MODELO = "gemma2:2b"            # depois: "gemma2:9b"
+MODELO = "gemma4:e2b"            # depois: "gemma2:9b"
 OLLAMA_URL = "http://localhost:11434"
 TIMEOUT_LLM = 120
 
