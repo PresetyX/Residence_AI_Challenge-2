@@ -13,6 +13,7 @@ from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
+from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
 
@@ -324,68 +325,33 @@ class AgenteSupervisor:
             }
         }
     def preparar_agendamento(self, projeto: str, prazo: str) -> dict:
-        """Monta uma prévia: cada tarefa recebe 60 minutos em um horário livre."""
-        # Preparar um novo cronograma cancela a prévia anterior.
+        """Prepara tarefas Pomodoro preservando 2h livres apos o agendamento."""
+        # So a previa fica pendente. Nao cria nada antes da confirmacao.
         self.cronograma_pendente = None
-
         if self.evento_pendente is not None:
             return {
                 "status": "erro", "acao": "planejar",
                 "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
             }
 
-        # Aproveita a Etapa 2: tarefas do mock + agenda real do Visualizar.
         consulta = self.consultar_periodos_projeto(projeto, prazo)
         if consulta.get("status") != "sucesso":
             return consulta
 
         try:
-            tarefas = consulta["dados"]["tarefas"]
-            livres = consulta["dados"]["livres"]
-
-            # Cada bloco tem início e fim; podemos avançar o início conforme usamos horas.
-            blocos = sorted(
-                [
-                    [datetime.fromisoformat(b["inicio"]), datetime.fromisoformat(b["fim"])]
-                    for b in livres
-                ],
-                key=lambda bloco: bloco[0]
+            eventos, detalhes = encaixar_tarefas_pomodoro(
+                consulta["dados"]["tarefas"],
+                consulta["dados"]["livres"],
             )
-
-            if not tarefas:
-                raise ValueError("Nenhuma tarefa recebida.")
-
-            eventos = []
-            for tarefa in tarefas:
-                for bloco in blocos:
-                    inicio = max(bloco[0], datetime.now(config.FUSO))
-                    # Não cria eventos com segundos quebrados, como 15:14:25.
-                    if inicio.second or inicio.microsecond:
-                        inicio = inicio.replace(second=0, microsecond=0) + timedelta(minutes=1)
-
-                    fim = inicio + timedelta(minutes=60)  # Temporário: rede neural virá depois.
-                    if fim <= bloco[1]:
-                        eventos.append({
-                            "titulo": f"[Destrava] {tarefa['titulo']}",
-                            "inicio": inicio.isoformat(),
-                            "fim": fim.isoformat(),
-                        })
-                        bloco[0] = fim  # Reserva esse horário na prévia.
-                        break
-                else:
-                    return {
-                        "status": "erro", "acao": "planejar",
-                        "mensagem": f"Não há horário livre suficiente para '{tarefa['titulo']}'. Nenhum evento foi criado."
-                    }
-        except (KeyError, TypeError, ValueError) as erro:
-            return {"status": "erro", "acao": "planejar", "mensagem": f"Dados inválidos: {erro}"}
+        except (SemEspacoPomodoro, ValueError, KeyError, TypeError) as erro:
+            return {"status": "erro", "acao": "planejar", "mensagem": str(erro)}
 
         self.cronograma_pendente = eventos
         return {
-            "status": "confirmacao",
-            "acao": "planejar",
-            "mensagem": "Confira a prévia. Responda 'sim' para criar ou 'não' para cancelar.",
-            "dados": {"projeto": projeto, "prazo": prazo, "eventos": eventos}
+            "status": "confirmacao", "acao": "planejar",
+            "mensagem": "Confira a previa Pomodoro. Responda 'sim' para criar ou 'nao' para cancelar.",
+            "dados": {"projeto": projeto, "prazo": prazo,
+                      "eventos": eventos, "pomodoros": detalhes}
         }
 
     def confirmar_agendamento(self, confirmado: bool) -> dict:
@@ -585,7 +551,7 @@ class AgenteSupervisor:
                 erro = _conferir_texto(pedido, inicio_llm, fim_llm, agora_dt)
                 if erro:
                     return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": erro}
-                evento = PedidoCriacao.model_validate(dados).model_dump(mode="json")
+                evento = PedidoCriacao.model_validate(dados).model_dump(mode="json", exclude_none=True)
             except ValidationError as erro:
                 detalhe = erro.errors()[0].get("msg", "Dados inválidos.")
                 return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": detalhe.removeprefix("Value error, ")}

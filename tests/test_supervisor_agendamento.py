@@ -8,7 +8,7 @@ from destrava.core import config
 
 def montar_supervisor(tarefas=3):
     inicio = datetime.now(config.FUSO).replace(hour=14, minute=0, second=0, microsecond=0) + timedelta(days=1)
-    fim = inicio + timedelta(hours=4)
+    fim = inicio + timedelta(hours=6)
 
     agente_criar = MagicMock()
     agente_criar.executar_json.side_effect = lambda evento: {
@@ -52,7 +52,7 @@ def test_duracao_fixa_de_60_minutos():
         round((datetime.fromisoformat(e["fim"]) - datetime.fromisoformat(e["inicio"])).total_seconds() / 60)
         for e in eventos
     ]
-    assert duracoes == [60, 60, 60]
+    assert duracoes == [70, 70, 70]
 
 
 def test_sim_cria_uma_unica_vez():

@@ -48,3 +48,6 @@ ARQUIVO_CREDENCIAIS = RAIZ_PROJETO / NOME_ARQUIVO_CREDENCIAIS
 
 
 
+
+# Reserva obrigatoria: manter pelo menos 2h livres depois de agendar as tarefas.
+MINIMO_LIVRE_DIA = timedelta(hours=2)

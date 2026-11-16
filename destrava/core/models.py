@@ -75,6 +75,7 @@ class PedidoCriacao(BaseModel):
     titulo: str
     inicio: datetime
     fim: datetime
+    descricao: str | None = None
 
     @field_validator("titulo", mode="before")
     @classmethod

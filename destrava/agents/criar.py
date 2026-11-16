@@ -56,11 +56,14 @@ def validar_dados_evento(dados: dict) -> dict:
         ]
         raise ValueError(" ".join(dict.fromkeys(mensagens))) from erro
 
-    return {
+    resultado = {
         "titulo": pedido.titulo,
         "inicio": pedido.inicio.isoformat(),
         "fim": pedido.fim.isoformat(),
     }
+    if pedido.descricao:
+        resultado["descricao"] = pedido.descricao
+    return resultado
 
 
 def criar_evento_google(dados: dict, servico) -> dict:
@@ -97,6 +100,9 @@ def criar_evento_google(dados: dict, servico) -> dict:
             "timeZone": str(config.FUSO)
         }
     }
+
+    if evento.get("descricao"):
+        corpo["description"] = evento["descricao"]
 
     resultado = servico.events().insert(
         calendarId="primary",
@@ -188,6 +194,7 @@ class AgenteCriar:
                     "titulo": pedido.titulo,
                     "inicio": pedido.inicio.isoformat(),
                     "fim": pedido.fim.isoformat(),
+                    **({"descricao": pedido.descricao} if pedido.descricao else {}),
                 }
             )
         except Exception as erro:

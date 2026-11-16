@@ -34,6 +34,14 @@ def main():
         duracao = round((fim - inicio).total_seconds() / 60)
         print(f"- {evento['titulo']}: {inicio:%d/%m %H:%M} às {fim:%H:%M} ({duracao} min)")
 
+    print("\nDETALHES DO POMODORO (FOCO E PAUSAS):")
+    for tarefa in resposta["dados"].get("pomodoros", []):
+        print(f"\n- {tarefa['titulo']}")
+        for sessao in tarefa["sessoes"]:
+            a = datetime.fromisoformat(sessao["inicio"])
+            b = datetime.fromisoformat(sessao["fim"])
+            print(f"  {a:%H:%M}-{b:%H:%M} | {sessao['tipo']}")
+
     escolha = input("\nCriar esses eventos REAIS na Google Agenda? Digite sim ou não: ").strip().lower()
     if escolha not in ("sim", "não", "nao"):
         print("Resposta inválida. Nenhum evento foi criado.")
