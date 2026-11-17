@@ -29,7 +29,7 @@ function UserMessage({ message }: { message: ChatMessage }) {
       className="flex flex-col items-end"
     >
       <span className="sr-only">Você disse:</span>
-      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-violet-600 to-violet-800 px-4 py-2.5 text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap shadow-[0_8px_30px_-12px_rgb(124_58_237/0.9)] sm:max-w-[75%]">
+      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-gradient-to-br from-violet-700 to-violet-800 px-4 py-2.5 text-[0.9375rem] leading-relaxed break-words whitespace-pre-wrap shadow-[0_8px_30px_-12px_rgb(189_147_249/0.9)] sm:max-w-[75%]">
         {message.content}
       </div>
       <time dateTime={message.createdAt} className="mt-1 mr-1 text-[0.68rem] text-slate-500">
@@ -56,7 +56,7 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
       <span
         aria-hidden="true"
         className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-violet-800 ${
-          isStreaming ? "animate-pulse shadow-[0_0_22px_rgb(124_58_237/0.9)]" : ""
+          isStreaming ? "animate-pulse shadow-[0_0_22px_rgb(189_147_249/0.9)]" : ""
         }`}
       >
         <Sparkles className="size-4" />

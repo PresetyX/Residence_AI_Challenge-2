@@ -148,13 +148,13 @@ function CapabilityCard({ capability, index }: { capability: Capability; index: 
       transition={{ type: "spring", stiffness: 300, damping: 26 }}
       className={`group relative rounded-3xl border bg-ink-900/70 transition-colors ${
         open
-          ? "border-violet-400/60 shadow-[0_0_50px_-12px_rgb(124_58_237/0.7)]"
+          ? "border-violet-400/60 shadow-[0_0_50px_-12px_rgb(189_147_249/0.7)]"
           : "border-purple-500/20 hover:border-purple-400/45"
       }`}
     >
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_30%_0%,rgb(124_58_237/0.2),transparent_60%)] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+        className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_30%_0%,rgb(189_147_249/0.2),transparent_60%)] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
       />
       <button
         type="button"
@@ -163,7 +163,7 @@ function CapabilityCard({ capability, index }: { capability: Capability; index: 
         onClick={() => setOpen((value) => !value)}
         className="relative flex w-full items-start gap-4 rounded-3xl p-6 text-left"
       >
-        <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-purple-500/30 bg-violet-600/20 text-violet-300 transition group-hover:shadow-[0_0_24px_rgb(124_58_237/0.55)]">
+        <span className="grid size-11 shrink-0 place-items-center rounded-xl border border-purple-500/30 bg-violet-600/20 text-violet-300 transition group-hover:shadow-[0_0_24px_rgb(189_147_249/0.55)]">
           <Icon className="size-5" aria-hidden="true" />
         </span>
         <span className="min-w-0 flex-1">
@@ -313,7 +313,7 @@ function Architecture() {
               <span
                 className={`relative grid size-10 shrink-0 place-items-center rounded-xl border transition ${
                   selected
-                    ? "border-violet-300/60 bg-violet-600 text-white shadow-[0_0_24px_rgb(124_58_237/0.8)]"
+                    ? "border-violet-300/60 bg-violet-500 text-ink-950 shadow-[0_0_24px_rgb(189_147_249/0.8)]"
                     : "border-purple-500/30 bg-ink-900 text-violet-300"
                 }`}
               >
@@ -348,7 +348,7 @@ function Architecture() {
             transition={{ duration: 0.25 }}
             className="relative"
           >
-            <span className="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-violet-800 shadow-[0_0_30px_rgb(124_58_237/0.6)]">
+            <span className="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-500 to-violet-800 shadow-[0_0_30px_rgb(189_147_249/0.6)]">
               <ActiveIcon className="size-6" aria-hidden="true" />
             </span>
             <p className="mt-6 text-xs font-semibold tracking-[0.18em] text-violet-400 uppercase">
@@ -492,7 +492,7 @@ function Automation() {
               {scenario === key && (
                 <motion.span
                   layoutId="scenario-pill"
-                  className="absolute inset-0 rounded-lg bg-violet-600 shadow-[0_0_20px_rgb(124_58_237/0.6)]"
+                  className="absolute inset-0 rounded-lg bg-violet-600 shadow-[0_0_20px_rgb(189_147_249/0.6)]"
                   transition={{ type: "spring", stiffness: 400, damping: 32 }}
                 />
               )}

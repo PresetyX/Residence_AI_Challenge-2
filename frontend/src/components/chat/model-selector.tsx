@@ -89,7 +89,7 @@ export function ModelSelector() {
         }}
         className={`flex h-10 max-w-full items-center gap-2.5 rounded-xl border px-3 text-left transition disabled:opacity-60 ${
           open
-            ? "border-violet-400/70 bg-violet-600/15 shadow-[0_0_24px_-6px_rgb(124_58_237/0.8)]"
+            ? "border-violet-400/70 bg-violet-600/15 shadow-[0_0_24px_-6px_rgb(189_147_249/0.8)]"
             : "border-purple-500/25 bg-white/5 hover:border-purple-400/50 hover:bg-white/10"
         }`}
       >
@@ -148,7 +148,7 @@ export function ModelSelector() {
                     <span
                       className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg border ${
                         isSelected
-                          ? "border-violet-300/60 bg-violet-600 text-white"
+                          ? "border-violet-300/60 bg-violet-500 text-ink-950"
                           : "border-purple-500/25 bg-ink-950/60 text-violet-300"
                       }`}
                     >

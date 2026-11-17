@@ -43,8 +43,8 @@ export function CalendarEventCard({ action }: { action: CalendarAction }) {
       aria-label={`${meta.label}: ${event.title}`}
       className={`relative w-full max-w-md overflow-hidden rounded-2xl border bg-ink-900/80 backdrop-blur transition-shadow ${
         isActive
-          ? "border-violet-400/70 shadow-[0_0_40px_-10px_rgb(124_58_237/0.9)]"
-          : "border-purple-500/25 shadow-[0_10px_40px_-20px_rgb(124_58_237/0.7)]"
+          ? "border-violet-400/70 shadow-[0_0_40px_-10px_rgb(189_147_249/0.9)]"
+          : "border-purple-500/25 shadow-[0_10px_40px_-20px_rgb(189_147_249/0.7)]"
       }`}
     >
       <span

@@ -47,7 +47,7 @@ export function Composer() {
     <div className="shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-4">
       <form
         onSubmit={onSubmit}
-        className="glass mx-auto flex max-w-3xl items-end gap-2 rounded-3xl p-2 pl-4 transition focus-within:border-violet-400/60 focus-within:shadow-[0_0_40px_-10px_rgb(124_58_237/0.8)]"
+        className="glass mx-auto flex max-w-3xl items-end gap-2 rounded-3xl p-2 pl-4 transition focus-within:border-violet-400/60 focus-within:shadow-[0_0_40px_-10px_rgb(189_147_249/0.8)]"
       >
         <label htmlFor="chat-input" className="sr-only">
           Mensagem para o assistente
@@ -79,7 +79,7 @@ export function Composer() {
             disabled={!canSend}
             aria-label="Enviar mensagem"
             title="Enviar mensagem"
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-b from-violet-500 to-violet-700 shadow-[0_0_24px_-4px_rgb(124_58_237/0.9)] transition hover:from-violet-400 hover:to-violet-600 active:scale-95 disabled:pointer-events-none disabled:from-white/10 disabled:to-white/10 disabled:text-slate-500 disabled:shadow-none"
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-gradient-to-b from-violet-400 to-violet-500 text-ink-950 shadow-[0_0_24px_-4px_rgb(189_147_249/0.9)] transition hover:from-violet-300 hover:to-violet-400 active:scale-95 disabled:pointer-events-none disabled:from-white/10 disabled:to-white/10 disabled:text-slate-500 disabled:shadow-none"
           >
             <ArrowUp className="size-4.5" aria-hidden="true" />
           </button>

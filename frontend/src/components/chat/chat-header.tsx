@@ -49,7 +49,7 @@ export function ChatHeader({ user }: { user: User }) {
           {eventCount > 0 && (
             <span
               aria-hidden="true"
-              className="grid h-5 min-w-5 place-items-center rounded-full bg-violet-600 px-1.5 text-[0.68rem] font-semibold tabular-nums"
+              className="grid h-5 min-w-5 place-items-center rounded-full bg-pink-500 px-1.5 text-[0.68rem] font-semibold text-ink-950 tabular-nums"
             >
               {eventCount}
             </span>

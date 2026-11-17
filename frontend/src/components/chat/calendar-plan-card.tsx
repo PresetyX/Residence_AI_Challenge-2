@@ -36,7 +36,7 @@ export function CalendarPlanCard({ actions }: { actions: CalendarAction[] }) {
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ type: "spring", stiffness: 320, damping: 28 }}
       aria-label={goal ? `Plano ${goal}` : "Alterações na agenda"}
-      className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-purple-500/25 bg-ink-900/80 shadow-[0_10px_40px_-20px_rgb(124_58_237/0.7)] backdrop-blur"
+      className="relative w-full max-w-xl overflow-hidden rounded-2xl border border-purple-500/25 bg-ink-900/80 shadow-[0_10px_40px_-20px_rgb(189_147_249/0.7)] backdrop-blur"
     >
       <span
         aria-hidden="true"

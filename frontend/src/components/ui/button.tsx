@@ -16,12 +16,12 @@ const BASE =
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-gradient-to-b from-violet-500 to-violet-700 text-white shadow-[0_8px_30px_-8px_rgb(124_58_237/0.8)] hover:from-violet-400 hover:to-violet-600 hover:shadow-[0_8px_36px_-6px_rgb(168_85_247/0.9)]",
+    "bg-gradient-to-b from-violet-400 to-violet-500 text-ink-950 shadow-[0_8px_30px_-8px_rgb(189_147_249/0.8)] hover:from-violet-300 hover:to-violet-400 hover:shadow-[0_8px_36px_-6px_rgb(189_147_249/0.9)]",
   secondary:
     "border border-purple-500/25 bg-white/5 text-white hover:border-purple-400/50 hover:bg-white/10",
   ghost: "text-muted hover:bg-white/8 hover:text-white",
   danger:
-    "bg-gradient-to-b from-red-500 to-red-700 text-white shadow-[0_8px_30px_-10px_rgb(239_68_68/0.8)] hover:from-red-400 hover:to-red-600",
+    "bg-gradient-to-b from-red-400 to-red-500 text-ink-950 shadow-[0_8px_30px_-10px_rgb(255_85_85/0.8)] hover:from-red-300 hover:to-red-400",
 };
 
 const SIZES: Record<Size, string> = {

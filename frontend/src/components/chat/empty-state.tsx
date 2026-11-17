@@ -88,9 +88,9 @@ export function EmptyState({ userFirstName }: { userFirstName: string }) {
               type="button"
               onClick={() => (manual ? openCreateForm() : void sendMessage(prompt))}
               aria-haspopup={manual ? "dialog" : undefined}
-              className="group flex h-full w-full items-start gap-3 rounded-2xl border border-purple-500/20 bg-ink-900/70 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-400/60 hover:bg-violet-600/10 hover:shadow-[0_10px_40px_-16px_rgb(124_58_237/0.9)]"
+              className="group flex h-full w-full items-start gap-3 rounded-2xl border border-purple-500/20 bg-ink-900/70 p-4 text-left transition hover:-translate-y-0.5 hover:border-violet-400/60 hover:bg-violet-600/10 hover:shadow-[0_10px_40px_-16px_rgb(189_147_249/0.9)]"
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-600/20 text-violet-300 transition group-hover:bg-violet-600 group-hover:text-white">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-600/20 text-violet-300 transition group-hover:bg-violet-500 group-hover:text-ink-950">
                 <Icon className="size-4" aria-hidden="true" />
               </span>
               <span>
