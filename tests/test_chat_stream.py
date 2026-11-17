@@ -95,3 +95,22 @@ def test_excecao_no_supervisor_vira_mensagem_e_nao_derruba_o_stream():
 def test_sem_mensagens_e_rejeitado():
     resposta = _cliente(SupervisorFalso({})).post("/chat/stream", json={"mensagens": []})
     assert resposta.status_code == 422
+
+
+def test_cada_modelo_do_seletor_vai_para_a_sua_tag_do_ollama(monkeypatch):
+    from backend import chat
+
+    usados: list[str | None] = []
+    monkeypatch.setattr(chat, "perguntar", lambda prompt, formato=None, modelo=None: usados.append(modelo))
+
+    class SupervisorQueConsulta(SupervisorFalso):
+        def executar(self, pedido):
+            self.consultar_llm("prompt")
+            return {"status": "sucesso", "acao": "visualizar", "mensagem": "ok"}
+
+    cliente = _cliente(SupervisorQueConsulta({}))
+    for id_frontend in ("gemma-2b", "gemma-4-26b-a4b-q4_0", "gemma-4-12b-sfp8"):
+        cliente.post("/chat/stream", json={"modelo": id_frontend, "mensagens": [{"papel": "usuario", "conteudo": "x"}]})
+
+    assert usados == [chat.config.MODELOS_CHAT[i] for i in ("gemma-2b", "gemma-4-26b-a4b-q4_0", "gemma-4-12b-sfp8")]
+    assert len(set(usados)) == 3

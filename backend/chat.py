@@ -11,14 +11,15 @@ Contrato (frontend/src/services/inference-service.ts):
 O Supervisor interpreta só a última mensagem do usuário (ele não usa histórico)
 e guarda um único estado de confirmação ("sim"/"não"). Por isso existe uma
 instância por processo do backend, protegida por um lock: serve para uso local,
-uma pessoa por backend. O modelo usado é o de config.MODELO (variável MODELO),
-não o "modelo" escolhido no seletor do frontend, cujos ids não são tags do Ollama.
+uma pessoa por backend. O "modelo" do seletor do frontend é traduzido para uma
+tag do Ollama por config.MODELOS_CHAT; um id desconhecido usa config.MODELO.
 """
 
 import json
 import re
 import threading
 from collections.abc import Iterator
+from functools import partial
 from typing import Literal
 
 from fastapi import APIRouter, Request
@@ -26,6 +27,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from destrava.agents.supervisor import AgenteSupervisor
+from destrava.core import config
+from destrava.core.llm_client import perguntar
 
 router = APIRouter()
 
@@ -66,11 +69,20 @@ def _eventos_criados(resposta: dict) -> list[dict]:
     return []
 
 
-def respostas_do_supervisor(supervisor: AgenteSupervisor, pedido: str) -> Iterator[str]:
+def modelo_ollama(modelo_frontend: str) -> str:
+    """Tag do Ollama para o id do seletor do frontend."""
+    return config.MODELOS_CHAT.get(modelo_frontend, config.MODELO)
+
+
+def respostas_do_supervisor(
+    supervisor: AgenteSupervisor, pedido: str, modelo: str | None = None
+) -> Iterator[str]:
     """Executa o pedido e devolve as linhas NDJSON da resposta."""
-    yield _linha({"tipo": "status", "valor": "Consultando o modelo…"})
+    yield _linha({"tipo": "status", "valor": f"Consultando o modelo {modelo or config.MODELO}…"})
 
     with _lock:
+        if modelo:
+            supervisor.consultar_llm = partial(perguntar, modelo=modelo)
         try:
             resposta = supervisor.executar(pedido)
         except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
@@ -96,6 +108,6 @@ def chat_stream(corpo: ChatRequest, request: Request) -> StreamingResponse:
     )
     supervisor = _supervisor(request)
     return StreamingResponse(
-        respostas_do_supervisor(supervisor, pedido),
+        respostas_do_supervisor(supervisor, pedido, modelo_ollama(corpo.modelo)),
         media_type="application/x-ndjson",
     )

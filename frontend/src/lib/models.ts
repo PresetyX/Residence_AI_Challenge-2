@@ -3,23 +3,23 @@ import type { ModelId, ModelOption } from "./types";
 export const MODELS: ModelOption[] = [
   {
     id: "gemma-2b",
-    name: "Gemma 2B",
-    shortName: "Gemma 2B",
-    description: "Execução local no dispositivo",
-    runtime: "local",
+    name: "Gemma 4 E2B (Q4_K_M / 4-bit)",
+    shortName: "Gemma 4 E2B",
+    description: "Leve e rápido",
+    runtime: "cloud",
   },
   {
     id: "gemma-4-26b-a4b-q4_0",
-    name: "Gemma 4 26B A4B (Quantização Q4_0 / 4-bit)",
+    name: "Gemma 4 26B A4B (Q4_K_M / 4-bit)",
     shortName: "Gemma 4 26B A4B",
-    description: "Execução na nuvem (Alta performance)",
+    description: "Alta performance",
     runtime: "cloud",
   },
   {
     id: "gemma-4-12b-sfp8",
-    name: "Gemma 4 12B (Quantização SFP8 / 8-bit)",
+    name: "Gemma 4 12B (Q4_K_M / 4-bit)",
     shortName: "Gemma 4 12B",
-    description: "Execução na nuvem (Precisão balanceada)",
+    description: "Precisão balanceada",
     runtime: "cloud",
   },
 ];

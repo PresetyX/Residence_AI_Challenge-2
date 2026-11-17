@@ -68,8 +68,8 @@ def ambiente(monkeypatch):
 
 def test_config_sem_variaveis_usa_os_padroes(ambiente):
     cfg = ambiente()
-    assert cfg.OLLAMA_URL == "http://localhost:11434"
-    assert cfg.MODELO == "gemma2:2b"
+    assert cfg.OLLAMA_URL == "http://100.109.62.93:11434"
+    assert cfg.MODELO == "gemma4:12b-it-q4_K_M"
     assert cfg.STORY_POINTS_URL == ""
     assert cfg.CHAVE_API_IA == ""
     assert cfg.NUM_CTX == 8192
@@ -94,7 +94,7 @@ def test_config_le_as_variaveis_de_ambiente(ambiente):
 
 
 def test_variavel_vazia_vale_como_ausente(ambiente):
-    assert ambiente(OLLAMA_URL="   ").OLLAMA_URL == "http://localhost:11434"
+    assert ambiente(OLLAMA_URL="   ").OLLAMA_URL == "http://100.109.62.93:11434"
 
 
 @pytest.mark.parametrize("valor", ["muito", "0", "-5"])

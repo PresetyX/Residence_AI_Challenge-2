@@ -184,7 +184,7 @@ def traduzir_erros(modelo: str) -> Generator[None, None, None]:
 # ----------------------------------------------------------------- chat (LLM)
 
 
-def criar_chat(formato: dict | None = None) -> ChatOllama:
+def criar_chat(formato: dict | None = None, modelo: str | None = None) -> ChatOllama:
     """Cria o modelo de chat do LangChain com o modelo de config.MODELO.
 
     Args:
@@ -192,6 +192,8 @@ def criar_chat(formato: dict | None = None) -> ChatOllama:
             Ollama). Com ele, o Ollama só deixa o modelo gerar um JSON que
             caiba no esquema: sem Markdown, sem texto antes ou depois. None
             (padrão) deixa a resposta livre.
+        modelo: Tag do Ollama a usar no lugar de config.MODELO (ex.: o modelo
+            escolhido no seletor do chat). None usa config.MODELO.
 
     O objeto devolvido é um ``Runnable``: pode ser chamado direto
     (``chat.invoke("texto")``) ou encadeado com ``|`` numa cadeia LCEL.
@@ -200,7 +202,8 @@ def criar_chat(formato: dict | None = None) -> ChatOllama:
     Raises:
         ErroLLM: Se a configuração for inválida.
     """
-    modelo, base_url, timeout = _ler_config("MODELO")
+    modelo_config, base_url, timeout = _ler_config("MODELO")
+    modelo = modelo.strip() if isinstance(modelo, str) and modelo.strip() else modelo_config
     return ChatOllama(
         model=modelo,
         base_url=base_url,
@@ -212,13 +215,14 @@ def criar_chat(formato: dict | None = None) -> ChatOllama:
     )
 
 
-def perguntar(prompt: str, formato: dict | None = None) -> str:
+def perguntar(prompt: str, formato: dict | None = None, modelo: str | None = None) -> str:
     """
     Envia um prompt ao modelo definido em config.py, via Ollama.
 
     Args:
         prompt: Instruções e contexto preparados pelo agente.
         formato: JSON Schema que a resposta deve seguir (ver criar_chat).
+        modelo: Tag do Ollama no lugar de config.MODELO (None: config.MODELO).
 
     Returns:
         Texto gerado pelo modelo.
@@ -238,8 +242,8 @@ def perguntar(prompt: str, formato: dict | None = None) -> str:
     # 2. Cria o chat e envia. Um texto puro vira uma única mensagem do
     #    usuário ("human"). Isso importa para o Gemma 2, que não tem papel
     #    "system": todas as instruções já vêm dentro do próprio prompt.
-    chat = criar_chat(formato)
-    with traduzir_erros(config.MODELO):
+    chat = criar_chat(formato, modelo)
+    with traduzir_erros(modelo or config.MODELO):
         mensagem = chat.invoke(prompt)
 
     # 3. O chat devolve uma mensagem (AIMessage); o texto fica em .content.

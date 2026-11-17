@@ -54,8 +54,19 @@ def _numero_do_ambiente(nome: str, padrao: float) -> float:
 # Em desenvolvimento, o Ollama roda na própria máquina. Com o servidor de IA
 # compartilhado, cada pessoa aponta OLLAMA_URL para o PC com a GPU (pela
 # Tailscale) e não baixa modelo nenhum. Ex.: MODELO=gemma4:12b-it-q4_K_M.
-MODELO = _texto_do_ambiente("MODELO", "gemma2:2b")
-OLLAMA_URL = _texto_do_ambiente("OLLAMA_URL", "http://localhost:11434")
+MODELO = _texto_do_ambiente("MODELO", "gemma4:12b-it-q4_K_M")
+# Padrão: o servidor de IA compartilhado (PC com a GPU, IP da Tailscale).
+# Para usar um Ollama na própria máquina: OLLAMA_URL=http://localhost:11434.
+OLLAMA_URL = _texto_do_ambiente("OLLAMA_URL", "http://100.109.62.93:11434")
+
+# Modelos do seletor do chat (frontend/src/lib/models.ts) -> tags do Ollama.
+# Os três ficam no servidor de IA (docker-compose.servidor-ia.yml baixa todos).
+# Troque com as variáveis de ambiente abaixo.
+MODELOS_CHAT = {
+    "gemma-2b": _texto_do_ambiente("MODELO_GEMMA_2B", "gemma4:e2b-it-q4_K_M"),
+    "gemma-4-26b-a4b-q4_0": _texto_do_ambiente("MODELO_GEMMA_4_26B", "gemma4:26b-a4b-it-q4_K_M"),
+    "gemma-4-12b-sfp8": _texto_do_ambiente("MODELO_GEMMA_4_12B", "gemma4:12b-it-q4_K_M"),
+}
 # Segundos para a resposta do modelo chegar. Com várias pessoas na mesma GPU,
 # os pedidos entram em fila no Ollama; o padrão folgado evita estourar o tempo
 # enquanto se espera a vez. Aumente com TIMEOUT_LLM=600, por exemplo.
