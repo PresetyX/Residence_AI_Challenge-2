@@ -192,7 +192,56 @@ Todas são opcionais. Sem elas, vale o padrão do `destrava/core/config.py` (tud
 | `NUM_CTX` | `8192` | Janela de contexto pedida ao Ollama. O padrão do Ollama (~4096) pode cortar o prompt do Planejador. Use o mesmo valor em todo o time: um valor diferente faz o Ollama recarregar o modelo |
 | `CHAVE_API_IA` | vazio (desligada) | Chave compartilhada. No servidor, o serviço de story points passa a exigir o cabeçalho `X-API-Key`; no notebook, o backend envia esse cabeçalho |
 
-### 1. Preparar o servidor de IA (PC com a GPU)
+### 1. Preparar o servidor de IA com Docker (recomendado)
+
+Tudo o que o servidor roda (Ollama + serviço de story points, os dois na GPU) fica num Docker Compose: liga quando o time precisa e desliga para liberar a GPU. Não precisa instalar Ollama, Python nem torch no PC.
+
+Requisitos: [Docker Desktop](https://www.docker.com/products/docker-desktop/) com o backend WSL 2 e o driver da NVIDIA atualizado. Para conferir se o Docker enxerga a GPU:
+
+```
+docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi
+```
+
+Na raiz do projeto:
+
+```
+docker compose -f docker-compose.servidor-ia.yml up -d --build
+```
+
+Isso sobe três serviços:
+
+| Serviço | O que faz |
+|---|---|
+| `ollama` | Ollama na porta `11434`, com `OLLAMA_NUM_PARALLEL=2`, `OLLAMA_MAX_LOADED_MODELS=2`, `OLLAMA_KEEP_ALIVE=30m` e contexto de 8192 tokens |
+| `baixar-modelos` | Baixa `gemma4:12b-it-q4_K_M` e `nomic-embed-text` para o volume, se ainda não estiverem lá, e termina |
+| `story-points` | Serviço de story points na porta `8001` (BGE-M3 + `modelos/rede_neural.pt`). Na primeira vez, baixa o BGE-M3 (cerca de 2,3 GB) |
+
+A primeira subida demora (build da imagem com torch + cerca de 10 GB de modelos). Das próximas vezes, os modelos já estão nos volumes `destrava-ia_ollama-modelos` e `destrava-ia_hf-cache`, e a subida leva segundos.
+
+| Para | Comando |
+|---|---|
+| Ligar | `docker compose -f docker-compose.servidor-ia.yml up -d` |
+| Ver se está pronto | `docker compose -f docker-compose.servidor-ia.yml ps` (o `story-points` deve ficar `healthy`) |
+| Acompanhar os logs | `docker compose -f docker-compose.servidor-ia.yml logs -f ollama story-points` |
+| Desligar (libera a GPU) | `docker compose -f docker-compose.servidor-ia.yml down` |
+| Atualizar depois de mudar o código | `docker compose -f docker-compose.servidor-ia.yml up -d --build` |
+
+Opções, definidas no terminal antes do `up` (nada fica salvo no repositório):
+
+```
+$env:CHAVE_API_IA = "<chave>"       # o serviço de story points passa a exigir X-API-Key
+$env:MODELO = "gemma4:12b-it-q4_K_M" # outro modelo de chat para baixar e servir
+$env:IP_PUBLICACAO = "<ip-tailscale>" # abre as portas só na interface da Tailscale (recomendado)
+$env:OLLAMA_NUM_PARALLEL = "1"        # menos pedidos ao mesmo tempo, menos memória de GPU
+```
+
+Medido numa RTX 5070 Ti (16 GB), com `OLLAMA_NUM_PARALLEL=2`: o plano completo (Gemma 4 + RAG + story points) leva cerca de 25 s com os modelos já carregados, e a GPU chega a cerca de 14 GB. Não aumente o paralelismo com 16 GB. O primeiro pedido depois de ligar demora mais (cerca de 2 min), porque carrega os modelos na GPU.
+
+> Se o Ollama instalado no Windows também estiver aberto, ele continua respondendo em `localhost:11434` neste PC (o do Docker atende pelo IP da rede). Para testar o do Docker no próprio PC, use o IP da Tailscale ou feche o Ollama do Windows pelo ícone da bandeja (Quit).
+
+Depois, faça o passo 4 da seção seguinte (Tailscale + regra de firewall), que vale igual para o Docker.
+
+### 1b. Preparar o servidor de IA sem Docker (PC com a GPU)
 
 1. **Ollama.** Instale o [Ollama](https://ollama.com/download) e baixe os modelos:
 
@@ -213,7 +262,7 @@ Todas são opcionais. Sem elas, vale o padrão do `destrava/core/config.py` (tud
    ```
 
    - `OLLAMA_HOST=0.0.0.0:11434`: aceita conexões de outros PCs (o padrão só aceita a própria máquina). Quem limita o acesso é o firewall do passo 4.
-   - `OLLAMA_NUM_PARALLEL=2`: atende duas pessoas ao mesmo tempo; os demais pedidos esperam na fila. Cada pedido simultâneo reserva memória de contexto (`NUM_CTX`) na GPU: com 16 GB, 2 é seguro; teste 3 olhando o `nvidia-smi`.
+   - `OLLAMA_NUM_PARALLEL=2`: atende duas pessoas ao mesmo tempo; os demais pedidos esperam na fila. Cada pedido simultâneo reserva memória de contexto (`NUM_CTX`) na GPU: com 16 GB, 2 já usa cerca de 14 GB junto com o BGE-M3; não passe disso.
    - `OLLAMA_MAX_LOADED_MODELS=2`: mantém o modelo de chat e o de embeddings carregados juntos, sem trocar um pelo outro a cada pedido.
    - `OLLAMA_KEEP_ALIVE=30m`: o modelo fica na GPU por 30 minutos depois do último uso, sem o atraso de recarregar a cada pedido (`-1` mantém para sempre).
 
@@ -295,6 +344,8 @@ backend/
 ├── main.py                    API FastAPI (POST /projetos)
 ├── story_points.py            estimativa de story points: local (torch) ou cliente HTTP do servidor de IA
 └── servidor_story_points.py   serviço de story points do servidor de IA (POST /story-points)
+docker/                        Dockerfile do serviço de story points
+docker-compose.servidor-ia.yml servidor de IA com Docker (Ollama + story points na GPU)
 frontend/      interface web Next.js (landing, chat, agenda)
 destrava/
 ├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
