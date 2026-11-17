@@ -1,21 +1,67 @@
 import json
+from datetime import datetime
 from contextlib import asynccontextmanager
+from pathlib import Path
+from threading import Lock
+from typing import Any
 
-from fastapi import FastAPI, Request
-from pydantic import BaseModel, ConfigDict, field_validator
-from sqlalchemy.exc import SQLAlchemyError
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 import uvicorn
 
-from backend.database import get_session_factory
-from backend.history_models import HistoricoTarefa
 from backend.story_points import StoryPointsPredictor
 from destrava.agents.planejador import AgentePlanejador
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.rag import obter_rag
 
 
+RAIZ_PROJETO = Path(__file__).resolve().parents[1]
+CAMINHO_HISTORICO = RAIZ_PROJETO / "data" / "historico.json"
+_LOCK_HISTORICO = Lock()
+_MEDIA_INICIAL = 30.0
+_QUANTIDADE_INICIAL = 5
+
+
+def _salvar_historico() -> None:
+    CAMINHO_HISTORICO.parent.mkdir(parents=True, exist_ok=True)
+    CAMINHO_HISTORICO.write_text(
+        json.dumps(
+            {
+                "media_minutos_por_story_point": media_minutos_por_story_point,
+                "_quantidade_observacoes_media": _quantidade_observacoes_media,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _carregar_historico() -> None:
+    global media_minutos_por_story_point, _quantidade_observacoes_media
+
+    CAMINHO_HISTORICO.parent.mkdir(parents=True, exist_ok=True)
+    if CAMINHO_HISTORICO.exists():
+        dados = json.loads(CAMINHO_HISTORICO.read_text(encoding="utf-8"))
+    else:
+        dados = {}
+
+    valores_alterados = False
+    if "media_minutos_por_story_point" not in dados:
+        dados["media_minutos_por_story_point"] = _MEDIA_INICIAL
+        valores_alterados = True
+    if "_quantidade_observacoes_media" not in dados:
+        dados["_quantidade_observacoes_media"] = _QUANTIDADE_INICIAL
+        valores_alterados = True
+
+    media_minutos_por_story_point = float(dados["media_minutos_por_story_point"])
+    _quantidade_observacoes_media = int(dados["_quantidade_observacoes_media"])
+    if valores_alterados:
+        _salvar_historico()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _carregar_historico()
     app.state.story_points_predictor = StoryPointsPredictor()
     app.state.planejador = AgentePlanejador(rag=obter_rag("planejador"))
     app.state.visualizador = AgenteVisualizar()
@@ -23,6 +69,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Residence AI Challenge", lifespan=lifespan)
+
+media_minutos_por_story_point = _MEDIA_INICIAL
+_quantidade_observacoes_media = _QUANTIDADE_INICIAL
 
 
 class ProjetoRequest(BaseModel):
@@ -62,7 +111,28 @@ class HistoricoTarefaRequest(BaseModel):
         return valor
 
 
-@app.post("/projetos")
+class ProjetoResponse(BaseModel):
+    prazo: str
+    tarefas: list[dict[str, Any]]
+
+
+class StatusResponse(BaseModel):
+    status: str
+
+
+class TarefasResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    periodo: dict[str, Any] | None = None
+    tarefas: list[dict[str, Any]] | None = None
+
+
+class PerguntasCalibracaoResponse(BaseModel):
+    perguntas: list[dict[str, str]]
+
+
+@app.post("/projetos", response_model=ProjetoResponse)
 def criar_projeto(
     projeto: ProjetoRequest,
     request: Request,
@@ -84,39 +154,41 @@ def criar_projeto(
     print("Estimando duração das tarefas...")
     predictor: StoryPointsPredictor = request.app.state.story_points_predictor
     for tarefa in plano["tarefas"]:
-        tarefa["story_points"] = predictor.prever(tarefa)
-        print(f"Estimativa para a tarefa {tarefa['etapa']}: {tarefa['story_points']} story points")
+        story_points = predictor.prever(tarefa)
+        tarefa.pop("story_points", None)
+        tarefa["tempo_estimado_minutos"] = (
+            story_points * media_minutos_por_story_point
+        )
+        print(f"Estimativa para a tarefa {tarefa['etapa']}: {story_points} story points")
     
     return {"prazo": projeto.prazo, "tarefas": plano["tarefas"]}
 
 
-@app.post("/historico", status_code=201)
+@app.post("/historico", response_model=StatusResponse, status_code=201)
 def registrar_historico(
     historico: HistoricoTarefaRequest,
-) -> dict[str, object]:
-    registro = HistoricoTarefa(**historico.model_dump())
-    session = get_session_factory()()
-    try:
-        session.add(registro)
-        session.commit()
-        session.refresh(registro)
-        print("Histórico registrado com sucesso: ", registro)
-    except SQLAlchemyError:
-        session.rollback()
-        print("Erro ao registrar histórico de tarefa.")
-        raise
-    finally:
-        session.close()
+) -> dict[str, str]:
+    if historico.story_points <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="Os story points devem ser maiores que zero para compor a média.",
+        )
 
-    return {
-        "id": registro.id,
-        "story_points": registro.story_points,
-        "tempo_real_minutos": registro.tempo_real_minutos,
-        "criado_em": registro.criado_em,
-    }
+    global media_minutos_por_story_point, _quantidade_observacoes_media
+    with _LOCK_HISTORICO:
+        fator_tarefa = historico.tempo_real_minutos / historico.story_points
+        total_observacoes = _quantidade_observacoes_media + 1
+        media_minutos_por_story_point = (
+            media_minutos_por_story_point * _quantidade_observacoes_media
+            + fator_tarefa
+        ) / total_observacoes
+        _quantidade_observacoes_media = total_observacoes
+        _salvar_historico()
+
+    return {"status": "sucesso"}
 
 
-@app.get("/tarefas")
+@app.get("/tarefas", response_model=TarefasResponse)
 def listar_tarefas(
     inicio: str,
     fim: str,
@@ -209,19 +281,44 @@ perguntas = json.loads("""{
 }""")
 story_points_perguntas = [3, 7, 2, 8, 5, 10, 6, 1, 4, 13]
 
-@app.get("/calibracao")
-def listar_perguntas_calibracao():
-    return {"perguntas": perguntas}
+@app.get("/calibracao", response_model=PerguntasCalibracaoResponse)
+def listar_perguntas_calibracao() -> dict[str, object]:
+    return perguntas
 
-@app.post("/calibracao")
-def registrar_respostas_calibracao(respostas: list[int]):
+@app.post("/calibracao", response_model=StatusResponse)
+def registrar_respostas_calibracao(
+    respostas: list[StrictInt],
+) -> dict[str, str]:
     if len(respostas) != len(story_points_perguntas):
-        raise ValueError("O número de respostas não corresponde ao número de perguntas.")
-    
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "O número de respostas deve ser igual ao número de perguntas "
+                f"({len(story_points_perguntas)})."
+            ),
+        )
+    if any(resposta <= 0 for resposta in respostas):
+        raise HTTPException(
+            status_code=422,
+            detail="As respostas devem ser tempos reais em minutos maiores que zero.",
+        )
+
     fatores_calibracao = [x / y for x, y in zip(respostas, story_points_perguntas)]
-    media_minutos_por_story_point = sum(fatores_calibracao) / len(fatores_calibracao)
-    dp = (sum((x - media_minutos_por_story_point) ** 2 for x in fatores_calibracao) / len(fatores_calibracao)) ** 0.5
+    media_calibrada = sum(fatores_calibracao) / len(fatores_calibracao)
+    dp = (
+        sum(
+            (x - media_calibrada) ** 2
+            for x in fatores_calibracao
+        )
+        / len(fatores_calibracao)
+    ) ** 0.5
+
+    global media_minutos_por_story_point, _quantidade_observacoes_media
+    with _LOCK_HISTORICO:
+        media_minutos_por_story_point = media_calibrada
+        _quantidade_observacoes_media = len(fatores_calibracao)
+        _salvar_historico()
     
     print(f"Média de minutos por story point: {media_minutos_por_story_point:.2f}")
     print(f"Desvio padrão: {dp:.2f}")
-    return {"status": "sucesso", "media_minutos_por_story_point": media_minutos_por_story_point}
+    return {"status": "sucesso"}

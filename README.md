@@ -54,8 +54,6 @@ Para iniciar o backend com a rota de template:
 uvicorn backend.main:app
 ```
 
-A rota `GET /` responde com `{}`.
-
 Para criar um projeto, envie o texto e o prazo para `POST /projetos`:
 
 ```
@@ -83,6 +81,32 @@ python -m scripts.treinar_story_points joined_dataset.csv
 O notebook segue o mesmo fluxo: limpa o texto, gera embeddings BGE-M3, ajusta
 a PCA e o `StandardScaler` somente no conjunto de treino, treina uma MLP e
 exporta tudo em `modelos/rede_neural.pt`.
+
+Para calibrar a relação entre story points e tempo real, consulte as perguntas
+com `GET /calibracao` e envie uma lista com os 10 tempos, em minutos, na mesma
+ordem para `POST /calibracao`:
+
+```
+curl http://127.0.0.1:8000/calibracao
+curl -X POST http://127.0.0.1:8000/calibracao `
+  -H "Content-Type: application/json" `
+  -d '[30, 70, 20, 80, 50, 100, 60, 10, 40, 130]'
+```
+
+A resposta informa a média, o desvio padrão e o fator calculado para cada
+pergunta. Todos os tempos devem ser inteiros maiores que zero.
+
+O fator começa em 30 minutos por story point e a média considera inicialmente
+5 observações. Esses valores ficam persistidos em `data/historico.json`. Cada
+projeto converte os story points previstos em `tempo_estimado_minutos`. Ao
+registrar uma tarefa concluída com `POST /historico`, seu tempo real passa a
+compor a média com o mesmo peso de cada observação:
+
+```
+curl -X POST http://127.0.0.1:8000/historico `
+  -H "Content-Type: application/json" `
+  -d '{"story_points": 1, "tempo_real_minutos": 5}'
+```
 
 **Na primeira execução com o Google**, o navegador abre para você autorizar o acesso à agenda (leitura para o visualizar, escrita para o criar). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
 
@@ -172,13 +196,14 @@ Fuso horário, horários de acordar e dormir, duração mínima de um horário l
 ### Banco de dados SQLite
 
 O banco SQLite fica no arquivo `data/residence_ai.sqlite3` e possui as tabelas
-`usuarios`, `tarefas` e `historico_tarefas`. Usuários são identificados
+`usuarios` e `tarefas`. Usuários são identificados
 pelo identificador único fornecido pelo Google (`google_sub`); nenhuma senha é
 armazenada. A autenticação pelo Google será integrada posteriormente.
 A tabela de tarefas armazena `story_points` e `tempo_gasto_minutos`; ambos
 podem ficar nulos até que a estimativa ou a execução seja registrada.
-Também existe a tabela `historico_tarefas`, usada pela rota `POST /historico`
-para registrar `story_points` e `tempo_real_minutos`.
+O histórico da média da rota `POST /historico` não usa o banco: seus valores
+agregados ficam em `data/historico.json`, criado automaticamente na subida do
+backend quando ainda não existir.
 
 1. Copie a configuração de `.env.example` para `.env`, ou configure
    `DATABASE_URL=sqlite:///./data/residence_ai.sqlite3` no ambiente.
