@@ -128,3 +128,6 @@ PASTA_INDICES_RAG = RAIZ_PROJETO / ".rag_indices"
 
 
 
+
+# Reserva obrigatoria: manter pelo menos 2h livres depois de agendar as tarefas.
+MINIMO_LIVRE_DIA = timedelta(hours=2)
