@@ -6,7 +6,7 @@ import type {
   ProjectPlan,
 } from "@/lib/types";
 import { type EventDto, toCalendarEvent } from "./contracts";
-import { API_BASE_URL, ApiError, USE_MOCKS } from "./http";
+import { API_BASE_URL, ApiError, USE_CHAT_API } from "./http";
 import { mockStreamChat } from "./mocks/mock-supervisor";
 import { projectPlannerStream, routeToProjectPlanner } from "./project-planner";
 
@@ -41,11 +41,13 @@ export interface InferenceService {
 /** One NDJSON line emitted by the backend's POST /chat/stream. */
 type StreamLineDto =
   | { tipo: "token"; valor: string }
+  | { tipo: "status"; valor: string }
   | { tipo: "acao_agenda"; acao: CalendarActionType; evento: EventDto }
   | { tipo: "sugerir_painel_manual" };
 
 function toChunk(line: StreamLineDto): InferenceChunk {
   if (line.tipo === "token") return { type: "token", value: line.valor };
+  if (line.tipo === "status") return { type: "status", value: line.valor };
   if (line.tipo === "sugerir_painel_manual") return { type: "suggest_manual_panel" };
   const snapshot = toCalendarEvent(line.evento);
   return {
@@ -95,9 +97,9 @@ const httpInferenceService: InferenceService = {
   },
 };
 
-const supervisor: InferenceService = USE_MOCKS
-  ? { streamChat: mockStreamChat }
-  : httpInferenceService;
+const supervisor: InferenceService = USE_CHAT_API
+  ? httpInferenceService
+  : { streamChat: mockStreamChat };
 
 /** Project requests go to the backend planner; everything else to the Supervisor. */
 export const inferenceService: InferenceService = {

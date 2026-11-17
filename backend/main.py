@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, field_validator
 import uvicorn
 
+from backend.chat import router as chat_router
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
 from destrava.core import config
@@ -44,6 +45,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(chat_router)
 
 
 @app.get("/")

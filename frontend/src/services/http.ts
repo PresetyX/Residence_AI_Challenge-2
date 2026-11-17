@@ -16,6 +16,12 @@ export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS !== "false";
  */
 export const USE_PLANNER_API = process.env.NEXT_PUBLIC_USE_PLANNER_API !== "false";
 
+/**
+ * The chat (POST /chat/stream) talks to the backend Supervisor, which runs on Ollama. On by
+ * default, like the planner. Set NEXT_PUBLIC_USE_CHAT_API=false to chat with the in-browser mock.
+ */
+export const USE_CHAT_API = process.env.NEXT_PUBLIC_USE_CHAT_API !== "false";
+
 export class ApiError extends Error {
   constructor(
     message: string,
