@@ -1,7 +1,8 @@
 # Converte os dados enviados ao modelo e a resposta dele para o formato JSON.
 import json
 from datetime import date
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from destrava.core.llm_client import perguntar
 from destrava.prompts.planejador import PROMPT_PLANEJADOR
@@ -38,8 +39,31 @@ class Plano(BaseModel):
     tarefas: list[Tarefa] = Field(min_length=1)
 
 
-# JSON Schema do Plano, gerado pelo Pydantic e enviado ao Ollama como `format`.
+class NaoEntendi(BaseModel):
+    # Saída de escape: o modelo não conseguiu interpretar o pedido.
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    nao_entendi: Literal[True]
+
+
+# JSON Schema do Plano, gerado pelo Pydantic.
 ESQUEMA_PLANO = Plano.model_json_schema()
+
+# Esquema enviado ao Ollama como `format`: a resposta é um Plano ou um NaoEntendi.
+ESQUEMA_RESPOSTA = TypeAdapter(Plano | NaoEntendi).json_schema()
+
+
+MENSAGEM_NAO_ENTENDI = (
+    "Não entendi. Pode me contar o que o software faz, onde ele roda "
+    "(web, celular, terminal…), quais funcionalidades você quer e, "
+    "se tiver, as tecnologias?"
+)
+
+
+class PedidoNaoEntendido(Exception):
+    # O modelo não entendeu o pedido. A mensagem já é o texto final para o usuário.
+    def __init__(self):
+        super().__init__(MENSAGEM_NAO_ENTENDI)
 
 
 class ErroPlanejador(ValueError):
@@ -104,16 +128,22 @@ class AgentePlanejador:
             template=PROMPT_PLANEJADOR,
             entrada=entrada,
         )
-        # O esquema do Plano vai como `format` para o Ollama: a resposta já sai
-        # como JSON com a chave "tarefas" e os sete campos de cada tarefa.
+        # O esquema vai como `format` para o Ollama: a resposta já sai como JSON
+        # com a chave "tarefas" (sete campos por tarefa) ou com "nao_entendi".
         # As regras que o esquema não cobre (etapas de 1 a N, dependência
         # anterior, textos só com espaços) continuam sendo conferidas abaixo.
-        resposta = perguntar(prompt, formato=ESQUEMA_PLANO)
+        resposta = perguntar(prompt, formato=ESQUEMA_RESPOSTA)
 
         try:
-          
             texto_json = remover_bloco_markdown(resposta)
             dados = json.loads(texto_json)
+
+            # O modelo sinalizou que não entendeu o pedido: não há plano a validar.
+            # PedidoNaoEntendido não é ValueError, então escapa do except abaixo.
+            if isinstance(dados, dict) and "nao_entendi" in dados:
+                NaoEntendi.model_validate(dados)
+                raise PedidoNaoEntendido()
+
             plano = Plano.model_validate(dados)
 
             # Confere se a lista já está numerada de 1 até N, sem saltos,

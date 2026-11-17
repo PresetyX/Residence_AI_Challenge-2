@@ -71,9 +71,11 @@ Use quantas tarefas forem necessárias, sem preencher categorias artificialmente
 sem repetir uma ação com palavras diferentes.
 O prazo é contexto; não declare viabilidade sem estimativas e disponibilidade.
 
-SAÍDA:
-Retorne somente um objeto JSON com a chave "tarefas", uma lista não vazia, sem
-Markdown, crases ou explicações fora do JSON.
+PEDIDO NÃO ENTENDIDO:
+- Só use esta saída quando a ENTRADA claramente não descrever um projeto de
+  software que você consiga dividir (texto sem sentido, cumprimento, pedido fora
+  do assunto). Se der para planejar, planeje.
+- Nesse caso não invente tarefas. Retorne somente {{" ": true}}.
 """
 
 _SAIDA_EXEMPLO = """Exemplo de saída para o projeto de agenda de consultas (só mostra o formato; o

@@ -9,7 +9,11 @@ import json
 import pytest
 
 from destrava.agents import planejador as modulo
-from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
+from destrava.agents.planejador import (
+    AgentePlanejador,
+    ErroPlanejador,
+    PedidoNaoEntendido,
+)
 from destrava.prompts.planejador import PROMPT_PLANEJADOR
 from destrava.rag.rag import criar_template
 
@@ -58,7 +62,7 @@ def executar(monkeypatch, resposta):
     rag = RagFalso()
     plano = AgentePlanejador(rag=rag).executar("Uma API de alunos.", PRAZO)
     # O agente sempre pede a saída no formato do esquema do Plano.
-    assert chamadas == [modulo.ESQUEMA_PLANO]
+    assert chamadas == [modulo.ESQUEMA_RESPOSTA]
     return plano, rag
 
 
@@ -112,6 +116,26 @@ def test_plano_invalido(monkeypatch, tarefas, trecho_erro):
         executar(monkeypatch, {"tarefas": tarefas})
 
     assert erro.value.resposta_original
+
+
+def test_pedido_nao_entendido(monkeypatch):
+    with pytest.raises(PedidoNaoEntendido) as erro:
+        executar(monkeypatch, {"nao_entendi": True})
+
+    assert str(erro.value) == modulo.MENSAGEM_NAO_ENTENDI
+    assert str(erro.value).startswith("Não entendi. Pode me contar")
+
+
+@pytest.mark.parametrize(
+    "resposta",
+    [
+        {"nao_entendi": False},
+        {"nao_entendi": True, "extra": "x"},
+    ],
+)
+def test_nao_entendi_malformado(monkeypatch, resposta):
+    with pytest.raises(ErroPlanejador):
+        executar(monkeypatch, resposta)
 
 
 def test_resposta_que_nao_e_json(monkeypatch):
