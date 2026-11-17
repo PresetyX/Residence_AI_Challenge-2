@@ -13,7 +13,9 @@ COMO DIVIDIR:
   dados juntos). Nunca crie tarefas só de banco de dados, só de API ou só de telas:
   cada tela nasce junto com a funcionalidade que ela usa.
 - A tarefa 1 é a menor funcionalidade completa e já inclui o ambiente. Não crie
-  uma tarefa só de configuração.
+  uma tarefa só de configuração. A demonstração da tarefa 1 mostra uma operação do
+  usuário (por exemplo, cadastrar um item e ver o resultado), nunca a criação de
+  tabelas, a conexão com o banco ou o início do programa.
 - Ordene pelas dependências reais: o que sustenta outras tarefas vem antes. Os
   entregáveis e a demonstração só citam telas, campos e funcionalidades da própria
   tarefa ou de tarefas anteriores, nunca de uma tarefa posterior.
@@ -44,7 +46,8 @@ ESCOPO:
 - API: planeje as operações da API, sem criar telas.
 - Página de apresentação: planeje a exibição do conteúdo, sem inventar cadastros.
 - Armazenamento local: planeje salvar e recuperar dados no próprio dispositivo.
-- Programa de terminal: mantenha a interação no terminal, sem telas gráficas.
+- Programa de terminal: mantenha a interação no terminal (menu e opções), sem telas
+  gráficas e sem rotas de API.
 
 TAREFAS:
 Cada tarefa do JSON tem estes campos, nesta ordem:
