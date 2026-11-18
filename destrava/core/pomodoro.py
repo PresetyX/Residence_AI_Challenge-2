@@ -11,6 +11,20 @@ PAUSA_CURTA_MINUTOS = 5
 PAUSA_LONGA_MINUTOS = 15
 CICLOS_PARA_PAUSA_LONGA = 4
 TRABALHO_PADRAO_TAREFA_MINUTOS = 60  # Ate chegar a estimativa da rede neural.
+# Cada story point (estimado pela rede neural) vale este tempo de trabalho efetivo.
+MINUTOS_POR_STORY_POINT = TRABALHO_PADRAO_TAREFA_MINUTOS
+
+
+def minutos_de_trabalho(tarefa: dict) -> int:
+    """Trabalho efetivo da tarefa: story_points x MINUTOS_POR_STORY_POINT.
+
+    Sem story points validos (tarefa antiga ou sem estimativa), vale
+    TRABALHO_PADRAO_TAREFA_MINUTOS.
+    """
+    pontos = tarefa.get("story_points") if isinstance(tarefa, dict) else None
+    if isinstance(pontos, int) and not isinstance(pontos, bool) and pontos > 0:
+        return pontos * MINUTOS_POR_STORY_POINT
+    return TRABALHO_PADRAO_TAREFA_MINUTOS
 
 
 def gerar_sessoes_pomodoro(inicio: datetime, minutos_trabalho: int) -> list[dict]:

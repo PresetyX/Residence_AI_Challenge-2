@@ -17,6 +17,7 @@ from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_es
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
+from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
 
@@ -249,8 +250,9 @@ def criar_projeto(
         raise HTTPException(status_code=503, detail=str(erro)) from erro
     for tarefa, story_points in zip(plano["tarefas"], estimativas):
         tarefa["story_points"] = story_points
-        # Minutos estimados pela média calibrada (POST /calibracao e /historico).
-        tarefa["tempo_estimado_minutos"] = story_points * media_minutos_por_story_point
+        # Cada story point vale MINUTOS_POR_STORY_POINT (60 min, pomodoro.py), o
+        # mesmo tempo que o Supervisor reserva na agenda ao encaixar a tarefa.
+        tarefa["tempo_estimado_minutos"] = minutos_de_trabalho(tarefa)
         print(f"Estimativa para a tarefa {tarefa['etapa']}: {tarefa['story_points']} story points")
 
 
