@@ -28,6 +28,13 @@ class TarefaPlanejador(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     etapa: int = Field(ge=0)
     titulo: str = Field(min_length=1)
+    # Campos que o Planejador também devolve (POST /projetos). São opcionais:
+    # o encaixe na agenda usa só etapa e título.
+    objetivo: str | None = None
+    entregaveis: str | None = None
+    demonstracao: str | None = None
+    dependencia: int | None = None
+    story_points: int | None = None
 
 
 class RespostaPlanejador(BaseModel):
@@ -178,10 +185,14 @@ class AgenteSupervisor:
         self.evento_pendente = None
         self.cronograma_pendente = None
 
-    def receber_planejamento(self, projeto: str, prazo: str) -> dict:
-        """Recebe e valida as subtarefas devolvidas pelo Planejador."""
+    def receber_planejamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
+        """Recebe e valida as subtarefas devolvidas pelo Planejador.
 
-        if self.planejador is None:
+        Com ``tarefas`` (um plano já gerado, ex.: o do POST /projetos), valida
+        essas tarefas em vez de chamar o Planejador de novo.
+        """
+
+        if self.planejador is None and tarefas is None:
             return {
                 "status": "erro",
                 "acao": "planejar",
@@ -209,7 +220,11 @@ class AgenteSupervisor:
             }
 
         try:
-            resposta = self.planejador.executar(projeto.strip(), prazo)
+            resposta = (
+                {"tarefas": tarefas}
+                if tarefas is not None
+                else self.planejador.executar(projeto.strip(), prazo)
+            )
 
             plano = RespostaPlanejador.model_validate(resposta)
 
@@ -250,16 +265,16 @@ class AgenteSupervisor:
             "dados": {
                 "projeto": projeto.strip(),
                 "prazo": prazo,
-                "tarefas": [tarefa.model_dump() for tarefa in tarefas]
+                "tarefas": [tarefa.model_dump(exclude_none=True) for tarefa in tarefas]
             }
         }
 
         
-    def consultar_periodos_projeto(self, projeto: str, prazo: str) -> dict:
+    def consultar_periodos_projeto(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
         """Recebe as tarefas e consulta os horários livres até o prazo."""
 
         # 1. Recebe e valida as tarefas do Planejador.
-        planejamento = self.receber_planejamento(projeto, prazo)
+        planejamento = self.receber_planejamento(projeto, prazo, tarefas)
 
         if planejamento["status"] != "sucesso":
             return planejamento
@@ -333,7 +348,7 @@ class AgenteSupervisor:
                 "total_minutos_livres": dados["total_minutos_livres"]
             }
         }
-    def preparar_agendamento(self, projeto: str, prazo: str) -> dict:
+    def preparar_agendamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
         """Classifica o prazo e prepara a previa, sem criar eventos."""
         self.cronograma_pendente = None
         if self.evento_pendente is not None:
@@ -342,7 +357,7 @@ class AgenteSupervisor:
                 "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
             }
 
-        consulta = self.consultar_periodos_projeto(projeto, prazo)
+        consulta = self.consultar_periodos_projeto(projeto, prazo, tarefas)
         if consulta.get("status") != "sucesso":
             return consulta
 

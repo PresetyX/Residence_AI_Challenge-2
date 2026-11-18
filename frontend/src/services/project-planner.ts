@@ -6,7 +6,7 @@
  * description until the next message brings a date. Everything else (weekly plans by
  * free hours, refusals, free-slot queries) stays with the Supervisor stream.
  */
-import { formatLongDate } from "@/lib/format";
+import { formatLongDate, formatShortDate, formatTimeRange } from "@/lib/format";
 import type { ProjectPlan } from "@/lib/types";
 import type { InferenceChunk } from "./inference-service";
 import {
@@ -15,8 +15,9 @@ import {
   parseGoal,
   resetMockSupervisor,
 } from "./mocks/mock-supervisor";
-import { ApiError } from "./http";
-import { NOT_UNDERSTOOD, projectService } from "./project-service";
+import { ApiError, USE_CHAT_API } from "./http";
+import { toCalendarEvent } from "./contracts";
+import { NOT_UNDERSTOOD, projectService, scheduleService } from "./project-service";
 
 /** Project described in an earlier turn, waiting for its deadline. */
 let pendingProject: string | null = null;
@@ -24,9 +25,18 @@ let pendingProject: string | null = null;
 /** Project the planner did not understand: the next message adds details, same deadline. */
 let awaitingDetails: { description: string; deadline: Date } | null = null;
 
+/** Plan shown in the thread, waiting for "sim" to be placed on the calendar. */
+let pendingSchedule: { plan: ProjectPlan; goal: string } | null = null;
+
+/** Preview of the calendar slots shown; waiting for the final "sim" to create them. */
+let awaitingConfirm = false;
+
 export function resetProjectPlanner(): void {
   pendingProject = null;
   awaitingDetails = null;
+  pendingSchedule = null;
+  if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
+  awaitingConfirm = false;
 }
 
 const normalize = (text: string) =>
@@ -35,8 +45,11 @@ const normalize = (text: string) =>
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
 
+const YES = /^(sim|s|pode|ok|okay|bora|claro|quero|confirmo|confirma|confirmar|isso|manda|vai|agend\w*|encaix\w*)/;
+const NO = /^(nao|n|cancela\w*|deixa|agora nao|melhor nao)/;
+
 const PROJECT =
-  /\b(projeto|app|aplicativo|sistema|site|plataforma|api|software|produto|startup|mvp|jogo|game|dashboard|chatbot|bot)\b|\b(quero|preciso|vou|gostaria de|pretendo)\s+(criar|desenvolver|construir|fazer|montar|lancar|entregar|programar|implementar)\b/;
+  /\b(projeto|app|aplicativo|sistema|site|plataforma|api|software|produto|startup|mvp|jogo|game|dashboard|chatbot|bot|plano|planej\w*|planeje|tcc|monografia)\b|\b(quero|preciso|vou|gostaria de|pretendo)\s+(criar|desenvolver|construir|fazer|montar|lancar|entregar|programar|implementar)\b/;
 /** Weekly plans by free hours belong to the Supervisor ("tenho 10 horas livres"). */
 const HOURS = /\b\d{1,2}\s*horas?\b/;
 /** Single appointments are refused by the Supervisor, never planned here. */
@@ -97,6 +110,15 @@ export function parseDeadline(text: string, now = new Date()): Date | null {
   }
 
   if (/\b(fim|final) do ano\b/.test(t)) return new Date(today.getFullYear(), 11, 31);
+
+  // "esta semana" -> this Sunday; "semana que vem" / "proxima semana" -> next Sunday.
+  const sunday = new Date(today);
+  sunday.setDate(today.getDate() + ((7 - today.getDay()) % 7));
+  if (/\b(semana que vem|proxima semana|semana seguinte)\b/.test(t)) {
+    sunday.setDate(sunday.getDate() + 7);
+    return sunday;
+  }
+  if (/\b(esta|essa|nesta|nessa) semana\b/.test(t)) return sunday;
   return null;
 }
 
@@ -132,7 +154,19 @@ function goalFromDescription(description: string): string {
  */
 export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
+  const answer = t.trim();
   const hasDeadline = parseDeadline(text) !== null;
+
+  // A plan or a calendar preview is waiting for a yes/no: that answer is ours.
+  if (awaitingConfirm) {
+    if (YES.test(answer) || NO.test(answer)) return true;
+    awaitingConfirm = false;
+    void scheduleService.confirm(false).catch(() => undefined);
+  }
+  if (pendingSchedule) {
+    if (YES.test(answer) || NO.test(answer)) return true;
+    pendingSchedule = null;
+  }
 
   if (pendingProject && hasDeadline) return true;
   if (SINGLE_ITEM.test(t)) {
@@ -142,7 +176,9 @@ export function routeToProjectPlanner(text: string): boolean {
   if (awaitingDetails && !HOURS.test(t)) return true;
   awaitingDetails = null;
 
-  if (HOURS.test(t)) {
+  // The backend Supervisor has no weekly-hours plan (only the mock does): with the real
+  // chat, "um plano para meu TCC, tenho 10 horas esta semana" goes to the planner.
+  if (HOURS.test(t) && !(USE_CHAT_API && PROJECT.test(t))) {
     if (pendingProject) {
       if (!parseGoal(text)) mockSetPendingGoal(goalFromDescription(pendingProject));
       pendingProject = null;
@@ -178,13 +214,29 @@ export async function* projectPlannerStream(
   text: string,
   signal?: AbortSignal,
 ): AsyncGenerator<InferenceChunk> {
+  const answer = normalize(text).trim();
+  if (awaitingConfirm) {
+    awaitingConfirm = false;
+    yield* confirmSchedule(YES.test(answer), signal);
+    return;
+  }
+  if (pendingSchedule) {
+    const pending = pendingSchedule;
+    pendingSchedule = null;
+    if (NO.test(answer)) {
+      yield { type: "token", value: "Tudo bem, não mexi na sua agenda. O plano continua aqui no cartão." };
+      return;
+    }
+    yield* previewSchedule(pending.plan, pending.goal, signal);
+    return;
+  }
+
   const now = new Date();
   const details = awaitingDetails;
   awaitingDetails = null;
   const deadline = parseDeadline(text, now) ?? details?.deadline ?? null;
   const description = details
-    ? `${details.description}
-${text}`
+    ? `${details.description}\n${text}`
     : pendingProject && !PROJECT.test(normalize(text))
       ? pendingProject
       : text;
@@ -223,6 +275,57 @@ ${text}`
     }
     throw error;
   }
-  yield { type: "token", value: summarize(plan) };
+  pendingSchedule = { plan, goal: goalFromDescription(description) };
+  yield {
+    type: "token",
+    value: `${summarize(plan)}\n\nQuer que eu encaixe essas etapas nos seus horários livres do Google Agenda até **${longDate(plan.deadline)}**? Responda **sim** ou **não**.`,
+  };
   yield { type: "project_plan", plan };
+}
+
+const CLASS_LABEL = { tranquilo: "🟢 Prazo tranquilo", corrido: "🟡 Prazo corrido", impossivel: "🔴 Prazo impossível" };
+
+/** Asks the Supervisor to classify the deadline and lay the steps on free slots (nothing created yet). */
+async function* previewSchedule(
+  plan: ProjectPlan,
+  goal: string,
+  signal?: AbortSignal,
+): AsyncGenerator<InferenceChunk> {
+  yield { type: "status", value: "Classificando o prazo e procurando horários livres na sua agenda…" };
+  const preview = await scheduleService.preview(plan, goal, signal);
+  const slots = preview.dados?.eventos ?? [];
+  const kind = preview.classificacao ?? preview.dados?.classificacao;
+  const heading = kind ? `**${CLASS_LABEL[kind]}.** ` : "";
+
+  if (preview.status !== "confirmacao" || slots.length === 0) {
+    yield { type: "token", value: `${heading}${preview.mensagem}` };
+    return;
+  }
+
+  awaitingConfirm = true;
+  const lines = slots.map(
+    (slot) =>
+      `- **${slot.titulo.replace(/^\[Destrava\]\s*/, "")}** · ${formatShortDate(slot.inicio)}, ${formatTimeRange(slot.inicio, slot.fim)}`,
+  );
+  yield {
+    type: "token",
+    value: [
+      `${heading}${preview.mensagem.replace(/\s*Confira a previa e responda 'sim' ou 'nao'\.?/i, "")}`,
+      "",
+      ...lines,
+      "",
+      `Responda **sim** para criar ${slots.length === 1 ? "o evento" : `os ${slots.length} eventos`} ou **não** para cancelar.`,
+    ].join("\n"),
+  };
+}
+
+/** Creates (or drops) the previewed slots; each created event becomes a calendar card. */
+async function* confirmSchedule(confirmed: boolean, signal?: AbortSignal): AsyncGenerator<InferenceChunk> {
+  if (confirmed) yield { type: "status", value: "Criando os eventos no Google Agenda…" };
+  const result = await scheduleService.confirm(confirmed, signal);
+  yield { type: "token", value: result.mensagem };
+  for (const dto of result.dados?.eventos_criados ?? []) {
+    const snapshot = toCalendarEvent(dto);
+    yield { type: "calendar_action", action: { type: "created", eventId: snapshot.id, snapshot } };
+  }
 }

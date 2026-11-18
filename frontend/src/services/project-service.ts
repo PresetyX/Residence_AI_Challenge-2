@@ -6,6 +6,7 @@
  * Both stages are slow, so callers should show progress and allow cancelling.
  */
 import type { ProjectPlan, ProjectTask } from "@/lib/types";
+import type { EventDto } from "./contracts";
 import { ApiError, USE_PLANNER_API, delay, isAbortError, request, API_BASE_URL } from "./http";
 
 export interface ProjectRequestDto {
@@ -111,3 +112,65 @@ const mockProjectService: ProjectService = {
 };
 
 export const projectService: ProjectService = USE_PLANNER_API ? httpProjectService : mockProjectService;
+
+// ---------------------------------------------------------------------------
+// Scheduling a plan on the calendar (backend/chat.py):
+//   POST /projetos/agendar           -> deadline class + preview (nothing created yet)
+//   POST /projetos/agendar/confirmar -> creates the previewed events
+// ---------------------------------------------------------------------------
+
+export type DeadlineClass = "tranquilo" | "corrido" | "impossivel";
+
+export interface ScheduleSlotDto {
+  titulo: string;
+  inicio: string;
+  fim: string;
+  descricao?: string;
+}
+
+export interface SchedulePreviewDto {
+  status: "confirmacao" | "erro" | "esclarecimento";
+  mensagem: string;
+  classificacao?: DeadlineClass;
+  dados?: { classificacao?: DeadlineClass; eventos?: ScheduleSlotDto[] };
+}
+
+export interface ScheduleResultDto {
+  status: "sucesso" | "parcial" | "erro" | "cancelado";
+  mensagem: string;
+  dados?: { eventos_criados?: EventDto[] };
+}
+
+export function toTaskDto(task: ProjectTask): ProjectTaskDto {
+  return {
+    etapa: task.step,
+    titulo: task.title,
+    objetivo: task.goal,
+    entregaveis: task.deliverables,
+    demonstracao: task.demo,
+    dependencia: task.dependsOn,
+    story_points: task.storyPoints,
+  };
+}
+
+export const scheduleService = {
+  preview(plan: ProjectPlan, goal: string, signal?: AbortSignal): Promise<SchedulePreviewDto> {
+    return request<SchedulePreviewDto>("/projetos/agendar", {
+      method: "POST",
+      body: JSON.stringify({
+        projeto: plan.description,
+        prazo: plan.deadline,
+        tarefas: plan.tasks.map(toTaskDto),
+        meta: goal,
+      }),
+      signal,
+    });
+  },
+  confirm(confirmed: boolean, signal?: AbortSignal): Promise<ScheduleResultDto> {
+    return request<ScheduleResultDto>("/projetos/agendar/confirmar", {
+      method: "POST",
+      body: JSON.stringify({ confirmado: confirmed }),
+      signal,
+    });
+  },
+};
