@@ -9,7 +9,6 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
-import uvicorn
 
 from backend.calendario import router as calendario_router
 from backend.chat import router as chat_router
