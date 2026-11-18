@@ -92,6 +92,17 @@ def get_service(
     # Cada nível de permissão tem o seu arquivo de token.
     caminho_token = config.RAIZ_PROJETO / _arquivo_token(escopos_solicitados)
 
+    # Quem já autorizou a escrita (login do frontend) também pode ler: reusa
+    # esse token em vez de abrir um segundo consentimento só de leitura.
+    token_escrita = config.RAIZ_PROJETO / config.ARQUIVO_TOKEN_CALENDARIO
+    if (
+        set(escopos_solicitados) == {config.ESCOPO_SOMENTE_LEITURA}
+        and not caminho_token.exists()
+        and token_escrita.exists()
+    ):
+        escopos_solicitados = (config.ESCOPO_CALENDARIO,)
+        caminho_token = token_escrita
+
     # 1. Verifica que o credentials existe
     if not config.ARQUIVO_CREDENCIAIS.exists():
         raise FileNotFoundError(
