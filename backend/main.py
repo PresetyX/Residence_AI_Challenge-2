@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
-import uvicorn
 
 from backend.story_points import StoryPointsPredictor
 from destrava.agents.planejador import AgentePlanejador
@@ -137,7 +136,6 @@ def criar_projeto(
     projeto: ProjetoRequest,
     request: Request,
 ) -> dict[str, object]:
-    
     print("Planejando projeto: ", projeto.texto, "com prazo", projeto.prazo, "...")
     planejador: AgentePlanejador = request.app.state.planejador
     plano = planejador.executar(projeto.texto, projeto.prazo)
