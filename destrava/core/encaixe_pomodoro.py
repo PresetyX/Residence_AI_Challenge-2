@@ -74,27 +74,31 @@ def encaixar_tarefas_pomodoro(
     livres: list[dict],
     *,
     agora: datetime | None = None,
+    usar_pomodoro: bool = True,
 ) -> tuple[list[dict], list[dict]]:
-    """Retorna (eventos, detalhes_pomodoro) ou dispara SemEspacoPomodoro.
+    """Encaixa TODAS as tarefas ou dispara SemEspacoPomodoro.
 
-    O minimo de 2h deve SOBRAR apos cada agendamento. O saldo diario soma
-    as janelas livres do mesmo dia, descontando tarefas e suas pausas.
-    Os gaps de 30min sao livres e nao contam como trabalho do projeto.
+    Com Pomodoro, cada tarefa ocupa foco + pausas. Sem Pomodoro,
+    ocupa apenas os 60 minutos de trabalho (estimativa temporaria).
+    Ambos os modos preservam MINIMO_LIVRE_DIA, respeitam os compromissos
+    e permitem tarefas consecutivas, sem gap obrigatorio.
+
+    Nenhum evento e criado aqui: esta funcao apenas prepara uma previa.
     """
     if not tarefas:
         raise ValueError("Nenhuma tarefa recebida.")
+    if not isinstance(usar_pomodoro, bool):
+        raise TypeError("usar_pomodoro deve ser True ou False.")
+
     agora = _no_fuso(agora or datetime.now(config.FUSO))
     janelas = _janelas_acordadas(livres, agora)
 
-    # Cada minuto livre do dia e contado apenas uma vez, inclusive entre blocos.
     tempo_livre_por_dia = defaultdict(timedelta)
     for a, b in janelas:
         tempo_livre_por_dia[a.date()] += b - a
 
-    # Tempo total efetivamente reservado para tarefas, incluindo pausas Pomodoro.
     tempo_agendado_por_dia = defaultdict(timedelta)
     reserva = config.MINIMO_LIVRE_DIA
-    # Se ha menos de 2h antes de agendar, naturalmente nao cabe tarefa alguma.
     janelas = [janela for janela in janelas
                if tempo_livre_por_dia[janela[0].date()] > reserva]
     fim_ultimo_evento_por_dia: dict = {}
@@ -102,9 +106,8 @@ def encaixar_tarefas_pomodoro(
 
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
-        # A estimativa da rede ainda nao chegou: 60min de trabalho efetivo.
+        # A estimativa da rede ainda nao esta integrada ao Supervisor.
         trabalho = TRABALHO_PADRAO_TAREFA_MINUTOS
-        # Futuramente o Planejador enviara a duracao em minutos.
         for janela in janelas:
             dia = janela[0].date()
             inicio = max(janela[0], agora)
@@ -112,29 +115,66 @@ def encaixar_tarefas_pomodoro(
             if anterior is not None:
                 inicio = max(inicio, anterior)
             inicio = _proximo_minuto(inicio)
-            sessoes = gerar_sessoes_pomodoro(inicio, trabalho)
-            fim = datetime.fromisoformat(sessoes[-1]["fim"])
-            duracao_total = fim - inicio  # Inclui todas as pausas Pomodoro.
+
+            if usar_pomodoro:
+                sessoes = gerar_sessoes_pomodoro(inicio, trabalho)
+                fim = datetime.fromisoformat(sessoes[-1]["fim"])
+                titulo = f"[Destrava] {titulo_tarefa} (Pomodoro)"
+                descricao = _descricao_pomodoro(sessoes, trabalho)
+            else:
+                sessoes = []
+                fim = inicio + timedelta(minutes=trabalho)
+                titulo = f"[Destrava] {titulo_tarefa}"
+                descricao = ("Destrava - Prazo corrido (sem tecnica Pomodoro)\\n"
+                             f"Trabalho estimado: {trabalho} minutos. "
+                             "Sem pausas Pomodoro programadas.")
+
+            duracao_total = fim - inicio
             saldo_apos = (tempo_livre_por_dia[dia] -
                           tempo_agendado_por_dia[dia] - duracao_total)
             if fim <= janela[1] and saldo_apos >= reserva:
-                titulo = f"[Destrava] {titulo_tarefa} (Pomodoro)"
                 eventos.append({
                     "titulo": titulo,
                     "inicio": inicio.isoformat(),
                     "fim": fim.isoformat(),
-                    "descricao": _descricao_pomodoro(sessoes, trabalho),
+                    "descricao": descricao,
                 })
-                detalhes.append({"titulo": titulo, "sessoes": sessoes})
+                if usar_pomodoro:
+                    detalhes.append({"titulo": titulo, "sessoes": sessoes})
                 fim_ultimo_evento_por_dia[dia] = fim
                 tempo_agendado_por_dia[dia] += duracao_total
-                janela[0] = fim  # Tarefa e pausas agora ocupam este bloco.
+                janela[0] = fim
                 break
         else:
+            modo = "com Pomodoro" if usar_pomodoro else "sem Pomodoro"
             raise SemEspacoPomodoro(
-                f"Nao ha horario suficiente para '{titulo_tarefa}' respeitando "
-                f"a reserva de {int(reserva.total_seconds() / 60)} minutos livres "
-                "APOS o agendamento e as pausas Pomodoro. "
-                "Nenhum evento foi criado."
+                f"Nao ha horario suficiente para '{titulo_tarefa}' {modo}, "
+                f"mantendo {int(reserva.total_seconds() / 60)} minutos "
+                "livres por dia. Nenhum evento foi criado."
             )
     return eventos, detalhes
+
+
+def calcular_deficit_minimo(
+    tarefas: list[dict],
+    livres: list[dict],
+    *,
+    agora: datetime | None = None,
+) -> int:
+    """Retorna o deficit MINIMO, em minutos, sem pausas Pomodoro.
+
+    Considera a soma de tempo utilizavel apos a reserva de cada dia.
+    Se retornar zero e o encaixe falhar, o problema e a fragmentacao
+    dos intervalos livres (o total por si so nao garante encaixe).
+    """
+    agora = _no_fuso(agora or datetime.now(config.FUSO))
+    por_dia = defaultdict(timedelta)
+    for inicio, fim in _janelas_acordadas(livres, agora):
+        por_dia[inicio.date()] += fim - inicio
+
+    minutos_disponiveis = sum(
+        max(0, int((duracao - config.MINIMO_LIVRE_DIA).total_seconds() // 60))
+        for duracao in por_dia.values()
+    )
+    minutos_necessarios = len(tarefas) * TRABALHO_PADRAO_TAREFA_MINUTOS
+    return max(0, minutos_necessarios - minutos_disponiveis)

@@ -13,7 +13,7 @@ from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
-from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro
+from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
 
@@ -325,8 +325,7 @@ class AgenteSupervisor:
             }
         }
     def preparar_agendamento(self, projeto: str, prazo: str) -> dict:
-        """Prepara tarefas Pomodoro preservando 2h livres apos o agendamento."""
-        # So a previa fica pendente. Nao cria nada antes da confirmacao.
+        """Classifica o prazo e prepara a previa, sem criar eventos."""
         self.cronograma_pendente = None
         if self.evento_pendente is not None:
             return {
@@ -338,20 +337,69 @@ class AgenteSupervisor:
         if consulta.get("status") != "sucesso":
             return consulta
 
+        tarefas = consulta["dados"]["tarefas"]
+        livres = consulta["dados"]["livres"]
+        agora = datetime.now(config.FUSO)
+
         try:
-            eventos, detalhes = encaixar_tarefas_pomodoro(
-                consulta["dados"]["tarefas"],
-                consulta["dados"]["livres"],
-            )
-        except (SemEspacoPomodoro, ValueError, KeyError, TypeError) as erro:
+            try:
+                eventos, detalhes = encaixar_tarefas_pomodoro(
+                    tarefas, livres, agora=agora,
+                )
+                classificacao = "tranquilo"
+            except SemEspacoPomodoro:
+                # Recalcula TODAS as tarefas sem Pomodoro, nao apenas as que faltaram.
+                try:
+                    eventos, detalhes = encaixar_tarefas_pomodoro(
+                        tarefas, livres, agora=agora, usar_pomodoro=False,
+                    )
+                    classificacao = "corrido"
+                except SemEspacoPomodoro:
+                    deficit = calcular_deficit_minimo(
+                        tarefas, livres, agora=agora,
+                    )
+                    if deficit:
+                        motivo = (f"Faltam pelo menos {deficit} minutos de "
+                                  "capacidade, mantendo 2h livres por dia.")
+                    else:
+                        motivo = ("A soma dos minutos seria suficiente, mas "
+                                  "as janelas livres nao comportam todas as tarefas.")
+                    return {
+                        "status": "erro", "acao": "planejar",
+                        "classificacao": "impossivel",
+                        "mensagem": ("Prazo IMPOSSIVEL: as tarefas nao cabem "
+                                     "ate a data limite, nem sem Pomodoro. " + motivo +
+                                     " Nenhum evento foi criado."),
+                        "dados": {
+                            "projeto": projeto, "prazo": prazo,
+                            "classificacao": "impossivel",
+                            "minutos_faltantes_minimos": deficit,
+                            "eventos": [],
+                        },
+                    }
+        except (ValueError, KeyError, TypeError) as erro:
             return {"status": "erro", "acao": "planejar", "mensagem": str(erro)}
 
         self.cronograma_pendente = eventos
+        if classificacao == "tranquilo":
+            mensagem = ("Prazo TRANQUILO: todas as tarefas cabem com Pomodoro "
+                        "e com a reserva diaria de 2h. Confira a previa e "
+                        "responda 'sim' ou 'nao'.")
+        else:
+            mensagem = ("Prazo CORRIDO: com Pomodoro nao coube. "
+                        "Todas as tarefas foram reorganizadas SEM Pomodoro, "
+                        "mantendo 2h livres por dia. Confira a previa e "
+                        "responda 'sim' ou 'nao'.")
         return {
             "status": "confirmacao", "acao": "planejar",
-            "mensagem": "Confira a previa Pomodoro. Responda 'sim' para criar ou 'nao' para cancelar.",
-            "dados": {"projeto": projeto, "prazo": prazo,
-                      "eventos": eventos, "pomodoros": detalhes}
+            "classificacao": classificacao,
+            "mensagem": mensagem,
+            "dados": {
+                "projeto": projeto, "prazo": prazo,
+                "classificacao": classificacao,
+                "eventos": eventos,
+                "pomodoros": detalhes,
+            },
         }
 
     def confirmar_agendamento(self, confirmado: bool) -> dict:
