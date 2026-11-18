@@ -31,12 +31,24 @@ let pendingSchedule: { plan: ProjectPlan; goal: string } | null = null;
 /** Preview of the calendar slots shown; waiting for the final "sim" to create them. */
 let awaitingConfirm = false;
 
+/** The assistant answered "não entendi" and asked what the project is: the next message is one. */
+let awaitingProject = false;
+
+/** Called when the backend asks for a project description (NDJSON "pedir_projeto"). */
+export function expectProjectDescription(): void {
+  awaitingProject = true;
+}
+
+/** Calendar questions keep going to the Supervisor even right after a "não entendi". */
+const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*|amanha|hoje)\b/;
+
 export function resetProjectPlanner(): void {
   pendingProject = null;
   awaitingDetails = null;
   pendingSchedule = null;
   if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
   awaitingConfirm = false;
+  awaitingProject = false;
 }
 
 const normalize = (text: string) =>
@@ -45,8 +57,8 @@ const normalize = (text: string) =>
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "");
 
-const YES = /^(sim|s|pode|ok|okay|bora|claro|quero|confirmo|confirma|confirmar|isso|manda|vai|agend\w*|encaix\w*)/;
-const NO = /^(nao|n|cancela\w*|deixa|agora nao|melhor nao)/;
+const YES = /^(sim|s|pode|ok|okay|bora|claro|quero|confirmo|confirma|confirmar|isso|manda|vai|agend\w*|encaix\w*)\b/;
+const NO = /^(nao|n|cancela\w*|deixa|agora nao|melhor nao)\b/;
 
 const PROJECT =
   /\b(projeto|app|aplicativo|sistema|site|plataforma|api|software|produto|startup|mvp|jogo|game|dashboard|chatbot|bot|plano|planej\w*|planeje|tcc|monografia)\b|\b(quero|preciso|vou|gostaria de|pretendo)\s+(criar|desenvolver|construir|fazer|montar|lancar|entregar|programar|implementar)\b/;
@@ -166,6 +178,10 @@ export function routeToProjectPlanner(text: string): boolean {
   if (pendingSchedule) {
     if (YES.test(answer) || NO.test(answer)) return true;
     pendingSchedule = null;
+  }
+  if (awaitingProject) {
+    awaitingProject = false;
+    if (!SINGLE_ITEM.test(t) && !CALENDAR.test(t) && !NO.test(answer)) return true;
   }
 
   if (pendingProject && hasDeadline) return true;

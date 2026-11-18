@@ -7,6 +7,7 @@ Contrato (frontend/src/services/inference-service.ts):
         {"tipo": "token", "valor": "..."}             pedaço do texto da resposta
         {"tipo": "acao_agenda", "acao": "created", "evento": {...}}
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
+        {"tipo": "pedir_projeto"}                     fora do escopo: a próxima mensagem vai ao Planejador
 
 O Supervisor interpreta só a última mensagem do usuário (ele não usa histórico)
 e guarda um único estado de confirmação ("sim"/"não"). Por isso existe uma
@@ -26,6 +27,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI
 from destrava.agents.supervisor import AgenteSupervisor
 from destrava.core import config
 from destrava.core.llm_client import perguntar
@@ -88,6 +90,13 @@ def respostas_do_supervisor(
         except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
             resposta = {"status": "erro", "acao": "interpretar", "mensagem": f"Falha no Supervisor: {erro}"}
 
+    # Fora do escopo da agenda (ex.: "banana com azeite") ou pedido de plano que o
+    # Supervisor não encaminha: responde como o Planejador, pedindo o projeto. O
+    # frontend manda a próxima mensagem para o Planejador ("pedir_projeto").
+    pede_projeto = resposta.get("status") == "indisponivel" and resposta.get("acao") in ("fora_escopo", "planejar")
+    if pede_projeto:
+        resposta = {**resposta, "mensagem": MENSAGEM_NAO_ENTENDI}
+
     mensagem = str(resposta.get("mensagem") or "Não consegui responder agora.")
     for pedaco in re.findall(r"\S+\s*|\s+", mensagem):
         yield _linha({"tipo": "token", "valor": pedaco})
@@ -95,8 +104,10 @@ def respostas_do_supervisor(
     for evento in _eventos_criados(resposta):
         yield _linha({"tipo": "acao_agenda", "acao": "created", "evento": evento})
 
+    if pede_projeto:
+        yield _linha({"tipo": "pedir_projeto"})
     # Pedido que o Supervisor ainda não faz (editar, excluir...): oferecer o painel manual.
-    if resposta.get("status") == "indisponivel" and resposta.get("acao") != "fora_escopo":
+    elif resposta.get("status") == "indisponivel":
         yield _linha({"tipo": "sugerir_painel_manual"})
 
 
