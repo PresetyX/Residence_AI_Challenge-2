@@ -4,7 +4,7 @@ import { SYSTEM_PROMPT } from "@/lib/assistant-rules";
 import { createId } from "@/lib/format";
 import { DEFAULT_MODEL_ID } from "@/lib/models";
 import type { ChatMessage, ModelId } from "@/lib/types";
-import { ApiError, isAbortError } from "@/services/http";
+import { ApiError, isAbortError, request } from "@/services/http";
 import { resetProjectPlanner } from "@/services/project-planner";
 import { inferenceService } from "@/services/inference-service";
 import { useCalendarStore } from "./calendar-store";
@@ -13,6 +13,8 @@ interface ChatState {
   messages: ChatMessage[];
   selectedModelId: ModelId;
   isGenerating: boolean;
+  /** The last reply settled the request: the next message starts a fresh conversation. */
+  conversationEnded: boolean;
   selectModel: (modelId: ModelId) => void;
   sendMessage: (text: string) => Promise<void>;
   stopGenerating: () => void;
@@ -21,6 +23,12 @@ interface ChatState {
 
 // Kept outside the store: an AbortController is not serializable state.
 let activeRequest: AbortController | null = null;
+
+/** Clears every pending step: the planner flow here and the Supervisor's "sim/não" on the backend. */
+function startOver(): Promise<void> {
+  resetProjectPlanner();
+  return request<void>("/chat/reiniciar", { method: "POST" }).catch(() => undefined);
+}
 
 export const useChatStore = create<ChatState>()(
   persist(
@@ -36,12 +44,20 @@ export const useChatStore = create<ChatState>()(
         messages: [],
         selectedModelId: DEFAULT_MODEL_ID,
         isGenerating: false,
+        conversationEnded: false,
 
         selectModel: (selectedModelId) => set({ selectedModelId }),
 
         async sendMessage(text) {
           const content = text.trim();
           if (!content || get().isGenerating) return;
+
+          // The Supervisor has no memory: once a request is settled, a new message is a new chat.
+          // Waits for the backend reset so it cannot wipe what this new message asks for.
+          if (get().conversationEnded) {
+            set({ messages: [], conversationEnded: false });
+            await startOver();
+          }
 
           const modelId = get().selectedModelId;
           const now = new Date().toISOString();
@@ -90,6 +106,9 @@ export const useChatStore = create<ChatState>()(
                 patchMessage(reply.id, () => ({ statusText: chunk.value }));
               } else if (chunk.type === "project_plan") {
                 patchMessage(reply.id, () => ({ projectPlan: chunk.plan }));
+              } else if (chunk.type === "conversation_end") {
+                patchMessage(reply.id, () => ({ endsConversation: true }));
+                set({ conversationEnded: true });
               } else {
                 patchMessage(reply.id, () => ({ suggestsManualPanel: true }));
               }
@@ -123,8 +142,8 @@ export const useChatStore = create<ChatState>()(
 
         resetConversation() {
           activeRequest?.abort();
-          resetProjectPlanner();
-          set({ messages: [], isGenerating: false });
+          void startOver();
+          set({ messages: [], isGenerating: false, conversationEnded: false });
         },
       };
     },

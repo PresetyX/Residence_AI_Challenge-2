@@ -121,3 +121,31 @@ def test_cada_modelo_do_seletor_vai_para_a_sua_tag_do_ollama(monkeypatch):
 
     assert usados == [chat.config.MODELOS_CHAT[i] for i in ("gemma-2b", "gemma-4-26b-a4b-q4_0", "gemma-4-12b-sfp8")]
     assert len(set(usados)) == 3
+
+
+def test_evento_criado_ou_cancelado_encerra_a_conversa():
+    for resposta in (
+        {"status": "sucesso", "acao": "criar", "mensagem": "Criado!", "dados": {"id": "e1", "titulo": "X", "inicio": "2026-11-20T10:00:00-03:00", "fim": "2026-11-20T11:00:00-03:00"}},
+        {"status": "cancelado", "acao": "criar", "mensagem": "Criação cancelada."},
+    ):
+        linhas = _conversar(_cliente(SupervisorFalso(resposta)), ("usuario", "sim"))
+        assert linhas[-1] == {"tipo": "fim_conversa"}
+
+
+def test_pergunta_pendente_nao_encerra_a_conversa():
+    for resposta in (
+        {"status": "confirmacao", "acao": "criar", "mensagem": "Confirma?"},
+        {"status": "sucesso", "acao": "visualizar", "mensagem": "Você tem 2h livres."},
+        {"status": "esclarecimento", "acao": "esclarecer", "mensagem": "Qual horário?"},
+    ):
+        linhas = _conversar(_cliente(SupervisorFalso(resposta)), ("usuario", "x"))
+        assert {"tipo": "fim_conversa"} not in linhas
+
+
+def test_reiniciar_esquece_as_confirmacoes_pendentes():
+    supervisor = SupervisorFalso({"status": "sucesso", "acao": "visualizar", "mensagem": "ok"})
+    supervisor.evento_pendente = {"titulo": "Reunião"}
+    supervisor.cronograma_pendente = [{"titulo": "Etapa 1"}]
+    resposta = _cliente(supervisor).post("/chat/reiniciar")
+    assert resposta.status_code == 204
+    assert supervisor.evento_pendente is None and supervisor.cronograma_pendente is None

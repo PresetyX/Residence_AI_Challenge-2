@@ -111,6 +111,15 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           </div>
         )}
 
+        {message.endsConversation && message.status === "done" && (
+          <p
+            role="status"
+            className="mt-4 flex items-center gap-3 text-xs text-muted before:h-px before:flex-1 before:bg-purple-500/25 after:h-px after:flex-1 after:bg-purple-500/25"
+          >
+            Conversa encerrada · sua próxima mensagem começa uma conversa nova
+          </p>
+        )}
+
         {message.suggestsManualPanel && message.status === "done" && (
           <div className="mt-4 flex flex-wrap gap-2">
             <button

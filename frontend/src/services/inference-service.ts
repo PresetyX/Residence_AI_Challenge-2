@@ -30,7 +30,9 @@ export type InferenceChunk =
   /** Progress note for slow backend work, shown until the first token arrives. */
   | { type: "status"; value: string }
   /** Project plan from POST /projetos. */
-  | { type: "project_plan"; plan: ProjectPlan };
+  | { type: "project_plan"; plan: ProjectPlan }
+  /** The request was settled (scheduled, cancelled, impossible): the chat starts over next time. */
+  | { type: "conversation_end" };
 
 export interface InferenceService {
   /** Streams the assistant reply. Calendar mutations arrive as `calendar_action` chunks. */
@@ -43,9 +45,11 @@ type StreamLineDto =
   | { tipo: "status"; valor: string }
   | { tipo: "acao_agenda"; acao: CalendarActionType; evento: EventDto }
   | { tipo: "sugerir_painel_manual" }
-  | { tipo: "pedir_projeto" };
+  | { tipo: "pedir_projeto" }
+  | { tipo: "fim_conversa" };
 
 function toChunk(line: Exclude<StreamLineDto, { tipo: "pedir_projeto" }>): InferenceChunk {
+  if (line.tipo === "fim_conversa") return { type: "conversation_end" };
   if (line.tipo === "token") return { type: "token", value: line.valor };
   if (line.tipo === "status") return { type: "status", value: line.valor };
   if (line.tipo === "sugerir_painel_manual") return { type: "suggest_manual_panel" };
