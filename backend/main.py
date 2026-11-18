@@ -3,6 +3,7 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Lock
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -16,6 +17,7 @@ from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_es
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
+from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
 
 
@@ -113,7 +115,10 @@ class ProjetoRequest(BaseModel):
     model_config = ConfigDict(strict=True)
 
     texto: str
-    prazo: str
+    # Opcional: sem ele, o prazo é lido do próprio texto ("até amanhã",
+    # "tenho uma semana", "20/12"...). Sem prazo nenhum, o plano sai assim mesmo
+    # e a resposta traz precisa_prazo=True.
+    prazo: str | None = None
 
     @field_validator("texto")
     @classmethod
@@ -125,11 +130,39 @@ class ProjetoRequest(BaseModel):
 
     @field_validator("prazo")
     @classmethod
-    def validar_prazo(cls, prazo: str) -> str:
+    def validar_prazo(cls, prazo: str | None) -> str | None:
+        if prazo is None:
+            return None
         prazo = prazo.strip()
         if not prazo:
             raise ValueError("O prazo não pode ser vazio.")
         return prazo
+
+
+class InterpretarPrazoRequest(BaseModel):
+    texto: str
+
+
+def _prazo_do_texto(texto: str) -> str | None:
+    """Prazo escrito no texto, em AAAA-MM-DD. 422 se a data não existir ou já passou."""
+    try:
+        prazo = interpretar_prazo(texto)
+    except ValueError as erro:
+        raise HTTPException(status_code=422, detail=str(erro)) from erro
+    if prazo is None:
+        return None
+    if prazo < datetime.now(config.FUSO).date():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Esse prazo ({prazo:%d/%m/%Y}) já passou. Qual é a nova data de entrega?",
+        )
+    return prazo.isoformat()
+
+
+@app.post("/prazos/interpretar")
+def interpretar_prazo_do_texto(corpo: InterpretarPrazoRequest) -> dict[str, str | None]:
+    """Lê o prazo de uma resposta como "até amanhã" ou "tenho uma semana"."""
+    return {"prazo": _prazo_do_texto(corpo.texto)}
 
 
 class HistoricoTarefaRequest(BaseModel):
@@ -172,14 +205,18 @@ def criar_projeto(
     projeto: ProjetoRequest,
     request: Request,
 ) -> dict[str, object]:
-    print("Planejando projeto: ", projeto.texto, "com prazo", projeto.prazo, "...")
+    prazo = projeto.prazo or _prazo_do_texto(projeto.texto)
+    # Sem prazo, planeja com um provisório (30 dias): o prazo só dá contexto ao
+    # Planejador, e é ele quem diz se o texto é mesmo um projeto.
+    prazo_planejamento = prazo or (datetime.now(config.FUSO).date() + timedelta(days=30)).isoformat()
+    print("Planejando projeto: ", projeto.texto, "com prazo", prazo or "(não informado)", "...")
     planejador: AgentePlanejador = request.app.state.planejador
     try:
-        plano = planejador.executar(projeto.texto, projeto.prazo)
+        plano = planejador.executar(projeto.texto, prazo_planejamento)
     except PedidoNaoEntendido as erro:
         # A IA não entendeu o projeto: o frontend mostra a pergunta e espera
         # mais detalhes (mesmo prazo).
-        return {"prazo": projeto.prazo, "tarefas": [], "nao_entendi": True, "mensagem": str(erro)}
+        return {"prazo": prazo, "tarefas": [], "nao_entendi": True, "mensagem": str(erro)}
     except ErroPlanejador as erro:
         # A IA respondeu, mas fora do contrato esperado.
         raise HTTPException(status_code=502, detail=str(erro)) from erro
@@ -193,65 +230,6 @@ def criar_projeto(
             detail=f"O planejador não está disponível: {erro}",
         ) from erro
 
-    # plano = json.loads("""{
-    # "tarefas": [
-    #     {
-    #     "etapa": 1,
-    #     "titulo": "Planejamento da infraestrutura e tecnologias",
-    #     "objetivo": "Definir a infraestrutura, tecnologias e ferramentas necessárias para o projeto de IA.",
-    #     "entregaveis": "Plano de infraestrutura, especificação de tecnologias (ex: linguagem de programação, framework de IA), lista de ferramentas (ex: plataformas de aprendizado de máquina, banco de dados)",
-    #     "demonstracao": "Desenvolver um plano de infraestrutura detalhado, especificando a plataforma de desenvolvimento, armazenamento de dados, hardware e software.",
-    #     "dependencia": 0,
-    #     "story_points": 6
-    #     },
-    #     {
-    #     "etapa": 2,
-    #     "titulo": "Criação da base de dados de sentimentos",
-    #     "objetivo": "Definir como os dados serão coletados e armazenados.",
-    #     "entregaveis": "Modelo de dados, blueprint de base de dados, plano de coleta de dados de sentimentos",
-    #     "demonstracao": "Definir um modelo de dados para coletar sentimentos de tweets (ex: tags, emoticons, frases), criar um banco de dados para armazenar os dados.",
-    #     "dependencia": 1,
-    #     "story_points": 4
-    #     },
-    #     {
-    #     "etapa": 3,
-    #     "titulo": "Treinamento do modelo de IA",
-    #     "objetivo": "Treinar o modelo de IA para análise de sentimentos em redes sociais.",
-    #     "entregaveis": "Modelo de IA treinado, código de modelo de IA, documentação de modelo de IA.",
-    #     "demonstracao": "Implementar um modelo de aprendizado de máquina (ex: LSTM, BERT) para analisar as redes sociais e determinar a presença de sentimentos (ex: positivo, negativo, neutro).",
-    #     "dependencia": 2,
-    #     "story_points": 8
-    #     },
-    #     {
-    #     "etapa": 4,
-    #     "titulo": "Criação da API",
-    #     "objetivo": "Criar a API para interagir com o modelo de IA.",
-    #     "entregaveis": "Documentação da API, código da API, exemplos de uso da API",
-    #     "demonstracao": "Criar uma API para interagir com o modelo de IA, permitindo que outras aplicações acessem o modelo e utilize a análise de sentimentos.",
-    #     "dependencia": 3,
-    #     "story_points": 6
-    #     },
-    #     {
-    #     "etapa": 5,
-    #     "titulo": "Testes e otimização",
-    #     "objetivo": "Testar o modelo de IA e otimizá-lo para melhor precisão.",
-    #     "entregaveis": "Prototipo da API, testes de performance, documentação de testes",
-    #     "demonstracao": "Implementar testes unitários e de integração para o modelo de IA, otimizar o modelo para melhor precisão e confiabilidade.",
-    #     "dependencia": 4,
-    #     "story_points": 6
-    #     },
-    #     {
-    #     "etapa": 6,
-    #     "titulo": "Implementação da interface",
-    #     "objetivo": "Criar uma interface para usuários interagirem com o modelo de IA.",
-    #     "entregaveis": "Roteiro de interface, código da interface, documentação da interface",
-    #     "demonstracao": "Desenvolver a interface para que os usuários possam interagir com o modelo de IA, utilizando um sistema de busca por sentimentos em redes sociais.",
-    #     "dependencia": 5,
-    #     "story_points": 8
-    #     }
-    # ]
-    # }""")
-                       
     resumo = [
         {
             "etapa": tarefa["etapa"],
@@ -276,7 +254,10 @@ def criar_projeto(
         print(f"Estimativa para a tarefa {tarefa['etapa']}: {tarefa['story_points']} story points")
 
 
-    return {"prazo": projeto.prazo, "tarefas": plano["tarefas"]}
+    resposta: dict[str, object] = {"prazo": prazo, "tarefas": plano["tarefas"]}
+    if prazo is None:
+        resposta["precisa_prazo"] = True
+    return resposta
 
 
 @app.post("/historico", response_model=StatusResponse, status_code=201)

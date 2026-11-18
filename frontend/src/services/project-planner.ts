@@ -1,29 +1,25 @@
 /**
- * Chat flow for the backend project planner.
+ * Chat flow for the project planner (backend: POST /projetos and the scheduling routes).
  *
- * A message that describes a project ("quero criar um app de...") with a deadline goes
- * to POST /projetos. Without a deadline, the assistant asks for one and keeps the
- * description until the next message brings a date. Everything else (weekly plans by
- * free hours, refusals, free-slot queries) stays with the Supervisor stream.
+ * A message that describes a project goes to the Planejador. The deadline is read by the
+ * backend Supervisor from the message itself ("até amanhã", "tenho uma semana", "20/12",
+ * "em 3 meses"...). Without one, the plan is made anyway and the assistant asks only for
+ * the deadline; the answer is read by the backend too. Then the assistant offers to place
+ * the steps on the calendar (deadline class + preview) and creates them after a "sim".
+ * Everything else (free slots, single events) stays with the Supervisor chat stream.
  */
 import { formatLongDate, formatShortDate, formatTimeRange } from "@/lib/format";
 import type { ProjectPlan } from "@/lib/types";
-import type { InferenceChunk } from "./inference-service";
-import {
-  mockHasPendingPlan,
-  mockSetPendingGoal,
-  parseGoal,
-  resetMockSupervisor,
-} from "./mocks/mock-supervisor";
-import { ApiError, USE_CHAT_API } from "./http";
 import { toCalendarEvent } from "./contracts";
+import { ApiError } from "./http";
+import type { InferenceChunk } from "./inference-service";
 import { NOT_UNDERSTOOD, projectService, scheduleService } from "./project-service";
 
-/** Project described in an earlier turn, waiting for its deadline. */
-let pendingProject: string | null = null;
+/** Project planned without a deadline: the next message should bring it. */
+let pendingProject: { description: string; draft: ProjectPlan } | null = null;
 
-/** Project the planner did not understand: the next message adds details, same deadline. */
-let awaitingDetails: { description: string; deadline: Date } | null = null;
+/** Project the planner did not understand (or the Supervisor asked for one): the next message adds details. */
+let awaitingDetails: { description: string; deadline: string | null } | null = null;
 
 /** Plan shown in the thread, waiting for "sim" to be placed on the calendar. */
 let pendingSchedule: { plan: ProjectPlan; goal: string } | null = null;
@@ -31,35 +27,17 @@ let pendingSchedule: { plan: ProjectPlan; goal: string } | null = null;
 /** Preview of the calendar slots shown; waiting for the final "sim" to create them. */
 let awaitingConfirm = false;
 
-/** The assistant answered "não entendi" and asked what the project is: the next message is one. */
-let awaitingProject = false;
-
-/** Called when the backend asks for a project description (NDJSON "pedir_projeto"). */
-export function expectProjectDescription(): void {
-  awaitingProject = true;
-}
-
-/** Calendar questions keep going to the Supervisor even right after a "não entendi". */
-const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*|amanha|hoje)\b/;
-
-/** Plan already made for `pendingProject` (without a deadline yet), reused once it arrives. */
-let pendingDraft: ProjectPlan | null = null;
-
-/** Deadline sent to the planner while the user has not given one (it only frames the plan). */
-function provisionalDeadline(now: Date): Date {
-  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  date.setDate(date.getDate() + 30);
-  return date;
-}
-
 export function resetProjectPlanner(): void {
   pendingProject = null;
-  pendingDraft = null;
   awaitingDetails = null;
   pendingSchedule = null;
   if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
   awaitingConfirm = false;
-  awaitingProject = false;
+}
+
+/** Called when the backend answers "não entendi" and asks for a project (NDJSON "pedir_projeto"). */
+export function expectProjectDescription(): void {
+  awaitingDetails = { description: "", deadline: null };
 }
 
 const normalize = (text: string) =>
@@ -73,112 +51,15 @@ const NO = /^(nao|n|cancela\w*|deixa|agora nao|melhor nao)\b/;
 
 const PROJECT =
   /\b(projeto|app|aplicativo|sistema|site|plataforma|api|software|produto|startup|mvp|jogo|game|dashboard|chatbot|bot|plano|planej\w*|planeje|tcc|monografia)\b|\b(quero|preciso|vou|gostaria de|pretendo)\s+(criar|desenvolver|construir|fazer|montar|lancar|entregar|programar|implementar)\b/;
-/** Weekly plans by free hours belong to the Supervisor ("tenho 10 horas livres"). */
-const HOURS = /\b\d{1,2}\s*horas?\b/;
-/** Single appointments are refused by the Supervisor, never planned here. */
+/** Single appointments belong to the Supervisor ("crie uma reunião amanhã das 13h às 14h"). */
 const SINGLE_ITEM = /\b(evento|compromisso|reuniao|lembrete|consulta)\b/;
+/** Calendar questions keep going to the Supervisor ("quais meus horários livres?"). */
+const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*)\b/;
 
-const MONTHS = [
-  "janeiro", "fevereiro", "marco", "abril", "maio", "junho",
-  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
-];
-const NUMBER_WORDS: Record<string, number> = { um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6 };
-
-function validDate(year: number, month: number, day: number): Date | null {
-  const date = new Date(year, month - 1, day);
-  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
-    ? date
-    : null;
-}
-
-/** Day/month without a year: the next time that date comes around. */
-function nextOccurrence(month: number, day: number, today: Date): Date | null {
-  const thisYear = validDate(today.getFullYear(), month, day);
-  if (thisYear && thisYear >= today) return thisYear;
-  return validDate(today.getFullYear() + 1, month, day);
-}
-
-/** Finds a deadline in free text: 2026-12-31, 31/12/2026, 31/12, "31 de dezembro", "em 3 semanas". */
-export function parseDeadline(text: string, now = new Date()): Date | null {
-  const t = normalize(text);
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  const iso = t.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
-  if (iso) return validDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
-
-  const br = t.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?\b/);
-  if (br) {
-    const [day, month] = [Number(br[1]), Number(br[2])];
-    if (!br[3]) return nextOccurrence(month, day, today);
-    const year = br[3].length === 2 ? 2000 + Number(br[3]) : Number(br[3]);
-    return validDate(year, month, day);
-  }
-
-  const written = t.match(
-    new RegExp(`\\b(\\d{1,2})\\s+de\\s+(${MONTHS.join("|")})(?:\\s+(?:de\\s+)?(\\d{4}))?`),
-  );
-  if (written) {
-    const [day, month] = [Number(written[1]), MONTHS.indexOf(written[2]) + 1];
-    return written[3] ? validDate(Number(written[3]), month, day) : nextOccurrence(month, day, today);
-  }
-
-  const relative = t.match(/\b(?:em|daqui a|dentro de)\s+(\d{1,3}|um|uma|dois|duas|tres|quatro|cinco|seis)\s+(dias?|semanas?|mes|meses)\b/);
-  if (relative) {
-    const amount = NUMBER_WORDS[relative[1]] ?? Number(relative[1]);
-    const date = new Date(today);
-    if (relative[2].startsWith("dia")) date.setDate(date.getDate() + amount);
-    else if (relative[2].startsWith("semana")) date.setDate(date.getDate() + amount * 7);
-    else date.setMonth(date.getMonth() + amount);
-    return date;
-  }
-
-  if (/\b(fim|final) do ano\b/.test(t)) return new Date(today.getFullYear(), 11, 31);
-
-  // "esta semana" -> this Sunday; "semana que vem" / "proxima semana" -> next Sunday.
-  const sunday = new Date(today);
-  sunday.setDate(today.getDate() + ((7 - today.getDay()) % 7));
-  if (/\b(semana que vem|proxima semana|semana seguinte)\b/.test(t)) {
-    sunday.setDate(sunday.getDate() + 7);
-    return sunday;
-  }
-  if (/\b(esta|essa|nesta|nessa) semana\b/.test(t)) return sunday;
-  return null;
-}
-
-const pad = (value: number) => String(value).padStart(2, "0");
-const toIsoDate = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-const isPast = (date: Date, now: Date) =>
-  date < new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-/** "Quero desenvolver um app de controle de gastos pessoais" -> "App de controle de gastos pessoais". */
-function goalFromDescription(description: string): string {
-  const named = parseGoal(description);
-  if (named) return named;
-  const words = description
-    .replace(/^.*?\b(?:criar|desenvolver|construir|fazer|montar|lançar|lancar|entregar|programar|implementar|realizar)\s+/i, "")
-    .replace(/^(?:um|uma|o|a|meu|minha)\s+/i, "")
-    .replace(/[,.;:!?].*$/, "")
-    .split(/\s+/)
-    .slice(0, 6)
-    .join(" ");
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Projeto";
-}
-
-/**
- * Decides who answers this message: the backend planner (project + deadline) or the
- * Supervisor (weekly focus blocks by free hours, refusals, free slots). The two flows
- * share the conversation, so an open question in one of them wins over keywords:
- *
- *   - planner asked for the deadline and the user answers with free hours -> the user
- *     chose weekly blocks: the project description becomes the Supervisor's goal;
- *   - Supervisor asked for the goal (or the hours) -> its answer stays with it, even when
- *     it says "projeto", unless the message brings a deadline.
- */
+/** Decides who answers this message: the planner flow (true) or the Supervisor stream. */
 export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
   const answer = t.trim();
-  const hasDeadline = parseDeadline(text) !== null;
 
   // A plan or a calendar preview is waiting for a yes/no: that answer is ours.
   if (awaitingConfirm) {
@@ -190,35 +71,14 @@ export function routeToProjectPlanner(text: string): boolean {
     if (YES.test(answer) || NO.test(answer)) return true;
     pendingSchedule = null;
   }
-  if (awaitingProject) {
-    awaitingProject = false;
-    if (!SINGLE_ITEM.test(t) && !CALENDAR.test(t) && !NO.test(answer)) return true;
-  }
 
-  if (pendingProject && hasDeadline) return true;
-  if (SINGLE_ITEM.test(t)) {
+  if (SINGLE_ITEM.test(t) || CALENDAR.test(t)) {
+    pendingProject = null;
     awaitingDetails = null;
     return false;
   }
-  if (awaitingDetails && !HOURS.test(t)) return true;
-  awaitingDetails = null;
-
-  // The backend Supervisor has no weekly-hours plan (only the mock does): with the real
-  // chat, "um plano para meu TCC, tenho 10 horas esta semana" goes to the planner.
-  if (HOURS.test(t) && !(USE_CHAT_API && PROJECT.test(t))) {
-    if (pendingProject) {
-      if (!parseGoal(text)) mockSetPendingGoal(goalFromDescription(pendingProject));
-      pendingProject = null;
-    }
-    return false;
-  }
-
-  if (mockHasPendingPlan() && !hasDeadline) return false;
-
-  if (!PROJECT.test(t)) return false;
-  // The planner takes over: forget any half-built weekly plan.
-  resetMockSupervisor();
-  return true;
+  if (pendingProject || awaitingDetails) return !NO.test(answer);
+  return PROJECT.test(t);
 }
 
 /** Deadline at noon so the long date never slips a day across time zones. */
@@ -235,6 +95,29 @@ function summarize(plan: ProjectPlan): string {
     "",
     `Comece pela etapa 1, **${first.title}**: o mais difícil é dar o primeiro passo. Abra cada etapa no cartão abaixo para ver o objetivo, os entregáveis e a demonstração.`,
   ].join("\n");
+}
+
+/** "Quero desenvolver um app de controle de gastos" -> "App de controle de gastos". */
+function goalFromDescription(description: string): string {
+  const named = description.match(/\b(tcc|monografia|disserta[çc][ãa]o|tese)\b/i);
+  if (named) return named[1].length <= 3 ? named[1].toUpperCase() : named[1];
+  const words = description
+    .trim()
+    .replace(/^.*?\b(?:criar|desenvolver|construir|fazer|montar|lançar|lancar|entregar|programar|implementar)\s+/i, "")
+    .replace(/^(?:um|uma|o|a|meu|minha)\s+/i, "")
+    .replace(/[,.;:!?].*$/s, "")
+    .split(/\s+/)
+    .slice(0, 6)
+    .join(" ");
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Projeto";
+}
+
+const ASK_DEADLINE =
+  "Qual é o **prazo de entrega**? Pode ser uma data (*20/12*, *20 de dezembro*) ou um tempo (*até amanhã*, *tenho uma semana*, *em 3 meses*).";
+
+/** Turns a 422 from the backend (date that does not exist or already passed) into a reply. */
+function isDeadlineError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 422;
 }
 
 export async function* projectPlannerStream(
@@ -258,69 +141,66 @@ export async function* projectPlannerStream(
     return;
   }
 
-  const now = new Date();
+  // The answer to "qual é o prazo?": the plan is already made, only the date is missing.
+  if (pendingProject && !PROJECT.test(normalize(text))) {
+    const pending = pendingProject;
+    let deadline: string | null;
+    try {
+      deadline = await projectService.interpretDeadline(text, signal);
+    } catch (error) {
+      if (!isDeadlineError(error)) throw error;
+      yield { type: "token", value: error.message };
+      return;
+    }
+    if (!deadline) {
+      yield { type: "token", value: `Não consegui entender o prazo. ${ASK_DEADLINE}` };
+      return;
+    }
+    pendingProject = null;
+    yield* offerPlan({ ...pending.draft, deadline }, pending.description);
+    return;
+  }
+
   const details = awaitingDetails;
   awaitingDetails = null;
-  const deadline = parseDeadline(text, now) ?? details?.deadline ?? null;
-  // A date answering "qual é o prazo?" belongs to the project described before.
-  const answersDeadline = pendingProject !== null && deadline !== null && !PROJECT.test(normalize(text));
-  const description = details
-    ? `${details.description}\n${text}`
-    : answersDeadline && pendingProject
-      ? pendingProject
-      : text;
-  const draft = answersDeadline ? pendingDraft : null;
   pendingProject = null;
-  pendingDraft = null;
+  const description = details?.description ? `${details.description}\n${text}` : text;
 
-  if (deadline && isPast(deadline, now)) {
-    pendingProject = description;
-    pendingDraft = draft;
-    yield {
-      type: "token",
-      value: `Esse prazo (**${longDate(toIsoDate(deadline))}**) já passou. Qual é a nova data de entrega?`,
-    };
-    return;
-  }
-
-  let plan: ProjectPlan;
-  if (draft && deadline) {
-    // The planner already split this project while we waited for the deadline.
-    plan = { ...draft, deadline: toIsoDate(deadline) };
-  } else {
-    // Without a deadline the planner still runs (with a provisional one): it is the one
-    // that tells a real project from "banana com azeite".
-    yield {
-      type: "status",
-      value: "Dividindo o projeto em etapas e estimando os story points. Isso pode levar alguns minutos…",
-    };
-    try {
-      plan = await projectService.planProject(
-        description,
-        toIsoDate(deadline ?? provisionalDeadline(now)),
-        signal,
-      );
-    } catch (error) {
-      if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
-        if (deadline) awaitingDetails = { description, deadline };
-        else awaitingProject = true;
-        yield { type: "token", value: error.message };
-        return;
-      }
-      throw error;
+  yield {
+    type: "status",
+    value: "Dividindo o projeto em etapas e estimando os story points. Isso pode levar alguns minutos…",
+  };
+  let planned;
+  try {
+    planned = await projectService.planProject(description, details?.deadline ?? null, signal);
+  } catch (error) {
+    if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
+      awaitingDetails = { description, deadline: details?.deadline ?? null };
+      yield { type: "token", value: error.message };
+      return;
     }
+    if (isDeadlineError(error)) {
+      // Date that does not exist or already passed: ask again, keep the project.
+      awaitingDetails = { description, deadline: null };
+      yield { type: "token", value: error.message };
+      return;
+    }
+    throw error;
   }
 
-  if (!deadline) {
-    pendingProject = description;
-    pendingDraft = plan;
+  if (planned.needsDeadline) {
+    pendingProject = { description, draft: planned.plan };
     yield {
       type: "token",
-      value: `Bora destravar esse projeto! Já dividi em **${plan.tasks.length} etapas**. Qual é o **prazo de entrega**? Pode ser uma data (*31/12/2026*) ou um tempo (*em 6 semanas*).`,
+      value: `Bora destravar esse projeto! Já dividi em **${planned.plan.tasks.length} etapas**. ${ASK_DEADLINE}`,
     };
     return;
   }
+  yield* offerPlan(planned.plan, description);
+}
 
+/** Shows the plan card and offers to place the steps on the calendar. */
+function* offerPlan(plan: ProjectPlan, description: string): Generator<InferenceChunk> {
   pendingSchedule = { plan, goal: goalFromDescription(description) };
   yield {
     type: "token",

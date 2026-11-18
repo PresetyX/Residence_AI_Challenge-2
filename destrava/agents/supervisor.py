@@ -14,6 +14,7 @@ from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
+from destrava.core.prazo import interpretar_prazo
 from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
@@ -184,6 +185,10 @@ class AgenteSupervisor:
         # Apenas estados de confirmação; não guardamos pedidos incompletos.
         self.evento_pendente = None
         self.cronograma_pendente = None
+
+    def interpretar_prazo(self, texto: str) -> date | None:
+        """Prazo de entrega escrito no pedido ("até amanhã", "tenho uma semana", "20/12")."""
+        return interpretar_prazo(texto, datetime.now(config.FUSO))
 
     def receber_planejamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
         """Recebe e valida as subtarefas devolvidas pelo Planejador.
