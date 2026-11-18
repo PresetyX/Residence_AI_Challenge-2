@@ -1,19 +1,16 @@
 /**
- * Project planner: POST /projetos on the backend (backend/main.py).
+ * Project planner on the backend (backend/main.py and backend/chat.py).
  *
- * The backend runs the Planejador agent (Ollama + RAG) to split the project into steps,
- * then replaces each step's story points with the estimate from the neural network.
- * Both stages are slow, so callers should show progress and allow cancelling.
+ *   POST /projetos            -> Planejador (Ollama + RAG) + story points of the neural network.
+ *                                The deadline comes from `prazo` or is read from the text itself
+ *                                by the Supervisor ("até amanhã", "tenho uma semana", "20/12").
+ *   POST /prazos/interpretar  -> reads a deadline from a short answer ("até sexta").
+ *   POST /projetos/agendar    -> deadline class + calendar preview (nothing created yet).
+ *   POST /projetos/agendar/confirmar -> creates the previewed events.
  */
 import type { ProjectPlan, ProjectTask } from "@/lib/types";
 import type { EventDto } from "./contracts";
-import { ApiError, USE_PLANNER_API, delay, isAbortError, request, API_BASE_URL } from "./http";
-
-export interface ProjectRequestDto {
-  texto: string;
-  /** YYYY-MM-DD */
-  prazo: string;
-}
+import { ApiError, request } from "./http";
 
 export interface ProjectTaskDto {
   etapa: number;
@@ -23,11 +20,16 @@ export interface ProjectTaskDto {
   demonstracao: string;
   dependencia: number;
   story_points: number;
+  /** Minutes from the calibrated average (POST /calibracao and /historico). */
+  tempo_estimado_minutos?: number;
 }
 
 export interface ProjectPlanDto {
-  prazo: string;
+  /** YYYY-MM-DD, or null when neither `prazo` nor the text had a deadline. */
+  prazo: string | null;
   tarefas: ProjectTaskDto[];
+  /** The plan is ready but the user still has to say the deadline. */
+  precisa_prazo?: boolean;
   /** The planner could not make sense of the project; `mensagem` asks for details. */
   nao_entendi?: boolean;
   mensagem?: string;
@@ -48,27 +50,32 @@ export function toProjectTask(dto: ProjectTaskDto): ProjectTask {
   };
 }
 
-export interface ProjectService {
-  planProject(description: string, deadline: string, signal?: AbortSignal): Promise<ProjectPlan>;
+export function toTaskDto(task: ProjectTask): ProjectTaskDto {
+  return {
+    etapa: task.step,
+    titulo: task.title,
+    objetivo: task.goal,
+    entregaveis: task.deliverables,
+    demonstracao: task.demo,
+    dependencia: task.dependsOn,
+    story_points: task.storyPoints,
+  };
 }
 
-const httpProjectService: ProjectService = {
-  async planProject(description, deadline, signal) {
-    let dto: ProjectPlanDto;
-    try {
-      dto = await request<ProjectPlanDto>("/projetos", {
-        method: "POST",
-        body: JSON.stringify({ texto: description, prazo: deadline } satisfies ProjectRequestDto),
-        signal,
-      });
-    } catch (error) {
-      if (isAbortError(error) || error instanceof ApiError) throw error;
-      // fetch() rejects with a TypeError when the server is down or CORS blocks the call.
-      throw new ApiError(
-        `Não consegui falar com o planejador em ${API_BASE_URL}. Verifique se o backend está rodando (uvicorn backend.main:app).`,
-        "NetworkError",
-      );
-    }
+export interface PlannedProject {
+  plan: ProjectPlan;
+  /** True when the backend found no deadline: `plan.deadline` is empty until the user gives one. */
+  needsDeadline: boolean;
+}
+
+export const projectService = {
+  /** `deadline` (YYYY-MM-DD) is optional: without it the backend reads it from the text. */
+  async planProject(description: string, deadline: string | null, signal?: AbortSignal): Promise<PlannedProject> {
+    const dto = await request<ProjectPlanDto>("/projetos", {
+      method: "POST",
+      body: JSON.stringify(deadline ? { texto: description, prazo: deadline } : { texto: description }),
+      signal,
+    });
 
     if (dto?.nao_entendi) {
       throw new ApiError(dto.mensagem ?? "Não entendi. Pode descrever o projeto com mais detalhes?", NOT_UNDERSTOOD);
@@ -77,47 +84,25 @@ const httpProjectService: ProjectService = {
       throw new ApiError("O planejador não devolveu nenhuma etapa. Tente descrever o projeto com mais detalhes.", "EmptyPlan");
     }
     return {
-      description,
-      deadline: dto.prazo ?? deadline,
-      tasks: dto.tarefas.map(toProjectTask).sort((a, b) => a.step - b.step),
+      plan: {
+        description,
+        deadline: dto.prazo ?? deadline ?? "",
+        tasks: dto.tarefas.map(toProjectTask).sort((a, b) => a.step - b.step),
+      },
+      needsDeadline: !dto.prazo && !deadline,
     };
   },
-};
 
-/** Offline stand-in with the same shape as the backend response. */
-const mockProjectService: ProjectService = {
-  async planProject(description, deadline, signal) {
-    await delay(1800, signal);
-    const steps: Array<[string, string, string, string, number]> = [
-      ["Planejamento", "Definir escopo, requisitos e funcionalidades do projeto.", "Documento de escopo e cronograma.", "Resumo do projeto com as funcionalidades principais.", 5],
-      ["Modelagem", "Definir a estrutura de dados e a arquitetura.", "Modelo de dados e diagrama da arquitetura.", "Esboço do modelo de dados e dos componentes.", 4],
-      ["Implementação", "Construir as funcionalidades principais.", "Código-fonte das funcionalidades e documentação.", "Fluxo principal funcionando de ponta a ponta.", 8],
-      ["Testes", "Testar o projeto em diferentes cenários.", "Relatório de testes e correções.", "Execução dos testes com os resultados.", 5],
-      ["Entrega", "Publicar e apresentar o projeto.", "Versão final publicada e apresentação.", "Demonstração do projeto completo.", 3],
-    ];
-    return {
-      description,
-      deadline,
-      tasks: steps.map(([title, goal, deliverables, demo, storyPoints], index) => ({
-        step: index + 1,
-        title,
-        goal,
-        deliverables,
-        demo,
-        dependsOn: index,
-        storyPoints,
-      })),
-    };
+  /** Deadline (YYYY-MM-DD) in a short answer, or null. Rejects with the backend message if it already passed. */
+  async interpretDeadline(text: string, signal?: AbortSignal): Promise<string | null> {
+    const dto = await request<{ prazo: string | null }>("/prazos/interpretar", {
+      method: "POST",
+      body: JSON.stringify({ texto: text }),
+      signal,
+    });
+    return dto.prazo;
   },
 };
-
-export const projectService: ProjectService = USE_PLANNER_API ? httpProjectService : mockProjectService;
-
-// ---------------------------------------------------------------------------
-// Scheduling a plan on the calendar (backend/chat.py):
-//   POST /projetos/agendar           -> deadline class + preview (nothing created yet)
-//   POST /projetos/agendar/confirmar -> creates the previewed events
-// ---------------------------------------------------------------------------
 
 export type DeadlineClass = "tranquilo" | "corrido" | "impossivel";
 
@@ -139,18 +124,6 @@ export interface ScheduleResultDto {
   status: "sucesso" | "parcial" | "erro" | "cancelado";
   mensagem: string;
   dados?: { eventos_criados?: EventDto[] };
-}
-
-export function toTaskDto(task: ProjectTask): ProjectTaskDto {
-  return {
-    etapa: task.step,
-    titulo: task.title,
-    objetivo: task.goal,
-    entregaveis: task.deliverables,
-    demonstracao: task.demo,
-    dependencia: task.dependsOn,
-    story_points: task.storyPoints,
-  };
 }
 
 export const scheduleService = {

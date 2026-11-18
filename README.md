@@ -78,7 +78,7 @@ npm run dev
 
 O chat chama `POST /projetos` quando o usuário descreve um projeto com prazo.
 
-O frontend usa o backend real por padrão (veja `frontend/.env.example`):
+O frontend sempre usa o backend (não há mocks; o endereço fica em `frontend/.env.example`):
 
 | Rota | Quem atende |
 |---|---|
@@ -88,9 +88,10 @@ O frontend usa o backend real por padrão (veja `frontend/.env.example`):
 | `PUT /calendar/events/{id}` | Agente de edição |
 | `DELETE /calendar/events/{id}` | Agente de exclusão |
 | `POST /chat/stream` | Chat com o Supervisor (Ollama) |
-| `POST /projetos` | Planejador + story points |
+| `POST /projetos` | Planejador + story points. `prazo` é opcional: o Supervisor lê o prazo do texto (`destrava/core/prazo.py`) |
+| `POST /prazos/interpretar` | Lê um prazo como "até amanhã", "tenho uma semana", "20/12" |
+| `POST /projetos/agendar`, `POST /projetos/agendar/confirmar` | Supervisor: classifica o prazo, mostra a prévia e cria os eventos |
 
-Para rodar o front sem conta Google, use `NEXT_PUBLIC_USE_MOCKS=true` em `frontend/.env.local`.
 O CORS aceita qualquer porta de `localhost` (o Next.js usa a 3001 se a 3000 estiver ocupada).
 
 Para criar um projeto, envie o texto e o prazo para `POST /projetos`:
