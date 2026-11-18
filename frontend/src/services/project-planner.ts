@@ -135,6 +135,7 @@ export async function* projectPlannerStream(
     pendingSchedule = null;
     if (NO.test(answer)) {
       yield { type: "token", value: "Tudo bem, não mexi na sua agenda. O plano continua aqui no cartão." };
+      yield { type: "conversation_end" };
       return;
     }
     yield* previewSchedule(pending.plan, pending.goal, signal);
@@ -224,7 +225,9 @@ async function* previewSchedule(
   const heading = kind ? `**${CLASS_LABEL[kind]}.** ` : "";
 
   if (preview.status !== "confirmacao" || slots.length === 0) {
+    // Impossible deadline (or nothing to place): this plan ends here.
     yield { type: "token", value: `${heading}${preview.mensagem}` };
+    yield { type: "conversation_end" };
     return;
   }
 
@@ -254,4 +257,6 @@ async function* confirmSchedule(confirmed: boolean, signal?: AbortSignal): Async
     const snapshot = toCalendarEvent(dto);
     yield { type: "calendar_action", action: { type: "created", eventId: snapshot.id, snapshot } };
   }
+  // Scheduled, cancelled or failed: either way this plan is settled.
+  yield { type: "conversation_end" };
 }

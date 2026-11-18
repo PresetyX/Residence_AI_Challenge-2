@@ -8,6 +8,9 @@ Contrato (frontend/src/services/inference-service.ts):
         {"tipo": "acao_agenda", "acao": "created", "evento": {...}}
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
         {"tipo": "pedir_projeto"}                     fora do escopo: a próxima mensagem vai ao Planejador
+        {"tipo": "fim_conversa"}                      pedido concluído: a próxima mensagem abre outra conversa
+
+POST /chat/reiniciar zera as confirmações pendentes do Supervisor (nova conversa).
 
 O Supervisor interpreta só a última mensagem do usuário (ele não usa histórico)
 e guarda um único estado de confirmação ("sim"/"não"). Por isso existe uma
@@ -24,7 +27,7 @@ from functools import partial
 from typing import Literal
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI
@@ -109,6 +112,37 @@ def respostas_do_supervisor(
     # Pedido que o Supervisor ainda não faz (editar, excluir...): oferecer o painel manual.
     elif resposta.get("status") == "indisponivel":
         yield _linha({"tipo": "sugerir_painel_manual"})
+
+    # O pedido chegou ao fim: o frontend encerra a conversa e a próxima mensagem
+    # começa outra (o Supervisor não tem memória, então não há o que continuar).
+    if conversa_terminou(resposta):
+        yield _linha({"tipo": "fim_conversa"})
+
+
+def conversa_terminou(resposta: dict) -> bool:
+    """Evento avulso criado/cancelado ou plano agendado/cancelado/impossível."""
+    status, acao = resposta.get("status"), resposta.get("acao")
+    if acao == "criar":
+        return status in ("sucesso", "parcial", "cancelado")
+    if acao == "planejar":
+        return status in ("sucesso", "parcial", "cancelado") or resposta.get("classificacao") == "impossivel"
+    return False
+
+
+def zerar_supervisor(supervisor: AgenteSupervisor) -> None:
+    """Esquece qualquer confirmação pendente (evento avulso ou cronograma)."""
+    supervisor.evento_pendente = None
+    supervisor.cronograma_pendente = None
+
+
+@router.post("/chat/reiniciar", status_code=204)
+def reiniciar_chat(request: Request) -> Response:
+    """Nova conversa: o Supervisor esquece o que estava esperando "sim" ou "não"."""
+    supervisor = getattr(request.app.state, "supervisor", None)
+    if supervisor is not None:
+        with _lock:
+            zerar_supervisor(supervisor)
+    return Response(status_code=204)
 
 
 @router.post("/chat/stream")

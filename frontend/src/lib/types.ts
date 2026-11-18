@@ -100,4 +100,6 @@ export interface ChatMessage {
   projectPlan?: ProjectPlan;
   /** Progress note shown while the reply is still empty (long backend calls). */
   statusText?: string;
+  /** The request was settled in this turn: the next message starts a new conversation. */
+  endsConversation?: boolean;
 }
