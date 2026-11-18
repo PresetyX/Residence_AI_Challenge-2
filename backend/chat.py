@@ -111,3 +111,47 @@ def chat_stream(corpo: ChatRequest, request: Request) -> StreamingResponse:
         respostas_do_supervisor(supervisor, pedido, modelo_ollama(corpo.modelo)),
         media_type="application/x-ndjson",
     )
+
+
+# ---------------------------------------------------------------------------
+# Agendamento de um plano do Planejador (POST /projetos) na agenda.
+#
+#   POST /projetos/agendar {projeto, prazo, tarefas, meta?}
+#       -> Supervisor.preparar_agendamento: classifica o prazo (tranquilo,
+#          corrido, impossivel) e devolve a prévia dos eventos, sem criar nada.
+#   POST /projetos/agendar/confirmar {confirmado}
+#       -> Supervisor.confirmar_agendamento: cria os eventos da prévia.
+# ---------------------------------------------------------------------------
+
+
+class AgendarRequest(BaseModel):
+    projeto: str
+    prazo: str
+    tarefas: list[dict] = Field(min_length=1)
+    # Meta do plano (frontend: planGoal), gravada em cada evento criado.
+    meta: str | None = None
+
+
+class ConfirmarRequest(BaseModel):
+    confirmado: bool
+
+
+@router.post("/projetos/agendar")
+def agendar_projeto(corpo: AgendarRequest, request: Request) -> dict:
+    supervisor = _supervisor(request)
+    with _lock:
+        # Um plano novo substitui um evento avulso que estava esperando "sim".
+        supervisor.evento_pendente = None
+        resposta = supervisor.preparar_agendamento(corpo.projeto, corpo.prazo, corpo.tarefas)
+        if resposta.get("status") == "confirmacao" and corpo.meta:
+            for evento in supervisor.cronograma_pendente or []:
+                evento["meta"] = corpo.meta
+    return resposta
+
+
+@router.post("/projetos/agendar/confirmar")
+def confirmar_agendamento(corpo: ConfirmarRequest, request: Request) -> dict:
+    supervisor = _supervisor(request)
+    with _lock:
+        # Os eventos criados voltam com a "meta" (o agente criar a devolve).
+        return supervisor.confirmar_agendamento(corpo.confirmado)
