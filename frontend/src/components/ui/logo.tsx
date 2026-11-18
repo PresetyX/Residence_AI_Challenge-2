@@ -13,13 +13,13 @@ const TEXT_SIZE: Record<LogoSize, string> = {
 };
 
 /**
- * The Destrava emblem (circuit brain + open padlock). The artwork ships as a white
+ * The Destrava emblem (open padlock). The artwork ships as a white
  * alpha mask (public/logo-mark.png) so it can be tinted with the brand gradient and
  * glow in CSS instead of baking colors into the image. See `.logo-mark` in globals.css.
  */
 export function LogoMark({ className = "h-9" }: { className?: string }) {
   return (
-    <span aria-hidden="true" className={`logo-mark-glow inline-block aspect-[5/4] ${className}`}>
+    <span aria-hidden="true" className={`logo-mark-glow inline-block aspect-square ${className}`}>
       <span className="logo-mark block size-full" />
     </span>
   );
