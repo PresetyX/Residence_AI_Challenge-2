@@ -91,7 +91,7 @@ function summarize(plan: ProjectPlan): string {
   );
   const first = plan.tasks[0];
   return [
-    `Montei um plano em **${plan.tasks.length} etapas** para entregar até **${longDate(plan.deadline)}**${days > 0 ? ` (${days} dias)` : ""}. Esforço total estimado pela rede neural: **${total} story points**.`,
+    `Montei um plano em **${plan.tasks.length} etapas** para entregar até **${longDate(plan.deadline)}**${days > 0 ? ` (${days} dias)` : ""}. Esforço total estimado pela rede neural: **${total} story points** (≈ **${total} h** de trabalho, 1 story point = 60 min).`,
     "",
     `Comece pela etapa 1, **${first.title}**: o mais difícil é dar o primeiro passo. Abra cada etapa no cartão abaixo para ver o objetivo, os entregáveis e a demonstração.`,
   ].join("\n");

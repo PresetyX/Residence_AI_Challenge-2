@@ -36,6 +36,8 @@ class TarefaPlanejador(BaseModel):
     demonstracao: str | None = None
     dependencia: int | None = None
     story_points: int | None = None
+    # Devolvido pelo POST /projetos (story_points x 60); o encaixe recalcula.
+    tempo_estimado_minutos: int | float | None = None
 
 
 class RespostaPlanejador(BaseModel):

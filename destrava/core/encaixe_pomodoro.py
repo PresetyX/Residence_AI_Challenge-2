@@ -9,7 +9,7 @@ Regras:
 from collections import defaultdict
 from datetime import datetime, timedelta
 from destrava.core import config
-from destrava.core.pomodoro import gerar_sessoes_pomodoro, TRABALHO_PADRAO_TAREFA_MINUTOS
+from destrava.core.pomodoro import gerar_sessoes_pomodoro, minutos_de_trabalho
 
 
 class SemEspacoPomodoro(ValueError):
@@ -78,8 +78,9 @@ def encaixar_tarefas_pomodoro(
 ) -> tuple[list[dict], list[dict]]:
     """Encaixa TODAS as tarefas ou dispara SemEspacoPomodoro.
 
-    Com Pomodoro, cada tarefa ocupa foco + pausas. Sem Pomodoro,
-    ocupa apenas os 60 minutos de trabalho (estimativa temporaria).
+    O trabalho de cada tarefa e story_points x MINUTOS_POR_STORY_POINT
+    (60 min, pomodoro.py); sem story points, 60 min. Com Pomodoro, a tarefa
+    ocupa esse trabalho + as pausas. Sem Pomodoro, apenas o trabalho.
     Ambos os modos preservam MINIMO_LIVRE_DIA, respeitam os compromissos
     e permitem tarefas consecutivas, sem gap obrigatorio.
 
@@ -106,8 +107,8 @@ def encaixar_tarefas_pomodoro(
 
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
-        # A estimativa da rede ainda nao esta integrada ao Supervisor.
-        trabalho = TRABALHO_PADRAO_TAREFA_MINUTOS
+        # Story points da rede neural x MINUTOS_POR_STORY_POINT (pomodoro.py).
+        trabalho = minutos_de_trabalho(tarefa)
         for janela in janelas:
             dia = janela[0].date()
             inicio = max(janela[0], agora)
@@ -176,5 +177,5 @@ def calcular_deficit_minimo(
         max(0, int((duracao - config.MINIMO_LIVRE_DIA).total_seconds() // 60))
         for duracao in por_dia.values()
     )
-    minutos_necessarios = len(tarefas) * TRABALHO_PADRAO_TAREFA_MINUTOS
+    minutos_necessarios = sum(minutos_de_trabalho(tarefa) for tarefa in tarefas)
     return max(0, minutos_necessarios - minutos_disponiveis)

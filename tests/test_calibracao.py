@@ -49,7 +49,7 @@ def test_calibracao_reinicia_media_e_contagem_de_tarefas():
     assert resposta == {"status": "sucesso"}
 
 
-def test_criar_projeto_converte_story_points_com_a_media_atual():
+def test_criar_projeto_converte_story_points_em_60_minutos_cada():
     registrar_respostas_calibracao([15 * pontos for pontos in story_points_perguntas])
 
     class PlanejadorFalso:
@@ -85,7 +85,8 @@ def test_criar_projeto_converte_story_points_com_a_media_atual():
         request,
     )
 
-    assert resposta["tarefas"][0]["tempo_estimado_minutos"] == pytest.approx(30)
+    # 2 story points x MINUTOS_POR_STORY_POINT (60, pomodoro.py), mesmo após calibrar.
+    assert resposta["tarefas"][0]["tempo_estimado_minutos"] == 120
 
 
 def test_registrar_historico_rejeita_zero_story_points():
