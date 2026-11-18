@@ -69,7 +69,7 @@ def ambiente(monkeypatch):
 def test_config_sem_variaveis_usa_os_padroes(ambiente):
     cfg = ambiente()
     assert cfg.OLLAMA_URL == "http://100.109.62.93:11434"
-    assert cfg.MODELO == "gemma4:12b-it-q4_K_M"
+    assert cfg.MODELO == "gemma4:e2b-it-q4_K_M"
     assert cfg.STORY_POINTS_URL == ""
     assert cfg.CHAVE_API_IA == ""
     assert cfg.NUM_CTX == 8192

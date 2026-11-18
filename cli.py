@@ -38,7 +38,11 @@ import json
 from datetime import datetime, timedelta
 
 from destrava.agents.criar import AgenteCriar
-from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
+from destrava.agents.planejador import (
+    AgentePlanejador,
+    ErroPlanejador,
+    PedidoNaoEntendido,
+)
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 
@@ -92,35 +96,45 @@ def rodar_planejador() -> bool:
     """
     print("Agente planejador. Descreva o projeto em texto livre.\n")
 
-    projeto = input("Projeto: ").strip()
+    prazo = None
 
-    if projeto.lower() in SAIR:
-        return False
-    if not projeto:
+    while True:
+        projeto = input("Projeto: ").strip()
+
+        if projeto.lower() in SAIR:
+            return False
+        if not projeto:
+            return True
+
+        # O prazo é pedido uma vez; se o modelo não entender o projeto, só o
+        # projeto é pedido de novo.
+        if prazo is None:
+            padrao = (
+                datetime.now(config.FUSO).date() + timedelta(days=PRAZO_PADRAO_DIAS)
+            ).isoformat()
+            prazo = input(f"Prazo (AAAA-MM-DD, Enter = {padrao}): ").strip() or padrao
+
+            if prazo.lower() in SAIR:
+                return False
+
+        print("\nPlanejando... (na primeira vez a base é indexada, e pode demorar)\n")
+
+        try:
+            plano = AgentePlanejador().executar(projeto, prazo)
+            print(json.dumps(plano, ensure_ascii=False, indent=2))
+        except PedidoNaoEntendido as erro:
+            # O modelo não entendeu o pedido: mostra a orientação e pede de novo.
+            print(f"{erro}\n")
+            continue
+        except ErroPlanejador as erro:
+            # O modelo respondeu, mas fora do formato esperado: mostra o que veio.
+            print(f"[resposta fora do contrato] {erro}")
+            print("Resposta original:")
+            print(erro.resposta_original)
+        except Exception as erro:
+            print(f"[erro] {erro}")
+
         return True
-
-    padrao = (
-        datetime.now(config.FUSO).date() + timedelta(days=PRAZO_PADRAO_DIAS)
-    ).isoformat()
-    prazo = input(f"Prazo (AAAA-MM-DD, Enter = {padrao}): ").strip() or padrao
-
-    if prazo.lower() in SAIR:
-        return False
-
-    print("\nPlanejando... (na primeira vez a base é indexada, e pode demorar)\n")
-
-    try:
-        plano = AgentePlanejador().executar(projeto, prazo)
-        print(json.dumps(plano, ensure_ascii=False, indent=2))
-    except ErroPlanejador as erro:
-        # O modelo respondeu, mas fora do formato esperado: mostra o que veio.
-        print(f"[resposta fora do contrato] {erro}")
-        print("Resposta original:")
-        print(erro.resposta_original)
-    except Exception as erro:
-        print(f"[erro] {erro}")
-
-    return True
 
 
 def main():
