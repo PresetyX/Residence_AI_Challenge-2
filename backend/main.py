@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, field_validator
 import uvicorn
 
+from backend.calendario import router as calendario_router
 from backend.chat import router as chat_router
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
@@ -41,11 +42,14 @@ CORS_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
+    # Qualquer porta em localhost (o Next.js sobe na 3001 se a 3000 estiver ocupada).
+    allow_origin_regex=os.getenv("CORS_ORIGIN_REGEX", r"http://(localhost|127\.0\.0\.1)(:\d+)?"),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.include_router(chat_router)
+app.include_router(calendario_router)
 
 
 @app.get("/")

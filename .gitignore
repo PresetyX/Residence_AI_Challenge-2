@@ -14,3 +14,4 @@ __pycache__/
 
 # RAG: cópia local dos índices
 .rag_indices/
+consentimento.json

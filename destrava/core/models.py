@@ -76,6 +76,9 @@ class PedidoCriacao(BaseModel):
     inicio: datetime
     fim: datetime
     descricao: str | None = None
+    local: str | None = None
+    # Meta do plano da IA a que o evento pertence (fica em extendedProperties).
+    meta: str | None = None
 
     @field_validator("titulo", mode="before")
     @classmethod

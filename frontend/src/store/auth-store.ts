@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ConsentRecord, User } from "@/lib/types";
 import { authService } from "@/services/auth-service";
+import { ApiError } from "@/services/http";
 
 type AuthStatus = "idle" | "loading" | "authenticated" | "error";
 
@@ -33,10 +34,13 @@ export const useAuthStore = create<AuthState>()(
           const session = await authService.signInWithGoogle(consent);
           set({ user: session.user, consent, status: "authenticated" });
           return true;
-        } catch {
+        } catch (error) {
           set({
             status: "error",
-            error: "Não foi possível entrar com o Google. Tente novamente.",
+            error:
+              error instanceof ApiError
+                ? error.message
+                : "Não foi possível entrar com o Google. Tente novamente.",
           });
           return false;
         }
