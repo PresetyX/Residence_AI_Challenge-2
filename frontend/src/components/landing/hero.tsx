@@ -126,7 +126,7 @@ function HeroBackground() {
   );
 }
 
-/** Static mock of a chat turn, so visitors see the product before signing in. */
+/** Illustration of a chat turn on the landing page, so visitors see the product before signing in. */
 function ChatPreview() {
   return (
     <motion.div

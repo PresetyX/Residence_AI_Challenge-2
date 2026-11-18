@@ -1,4 +1,3 @@
-import { createId } from "@/lib/format";
 import type { CalendarEvent, CalendarEventInput } from "@/lib/types";
 import {
   type AgentResponseDto,
@@ -9,7 +8,7 @@ import {
   toEventWriteDto,
   unwrapAgentResponse,
 } from "./contracts";
-import { ApiError, USE_MOCKS, delay, request } from "./http";
+import { ApiError, request } from "./http";
 
 export interface CalendarService {
   listEvents(): Promise<CalendarEvent[]>;
@@ -43,63 +42,6 @@ export function validateEventInput(input: CalendarEventInput): void {
     throw new ApiError("O início deve ser anterior ao término.", "ValidationError");
   }
 }
-
-// ---------------------------------------------------------------------------
-// Mock implementation: an in-memory calendar that lives for the page session.
-// ---------------------------------------------------------------------------
-
-const mockDb = new Map<string, CalendarEvent>();
-
-function requireMockEvent(id: string): CalendarEvent {
-  const event = mockDb.get(id);
-  if (!event) throw new ApiError("Agendamento não encontrado.", "NotFoundError", 404);
-  return event;
-}
-
-const mockCalendarService: CalendarService = {
-  async listEvents() {
-    await delay(200);
-    return [...mockDb.values()].sort((a, b) => a.start.localeCompare(b.start));
-  },
-  async getEvent(id) {
-    await delay(150);
-    return requireMockEvent(id);
-  },
-  async createEvent(input, planGoal) {
-    await delay(350);
-    validateEventInput(input);
-    const id = createId("evt");
-    const event: CalendarEvent = {
-      ...input,
-      title: input.title.trim(),
-      id,
-      link: `https://calendar.google.com/calendar/event?eid=${id}`,
-      syncStatus: "synced",
-      updatedAt: new Date().toISOString(),
-      planGoal,
-    };
-    mockDb.set(id, event);
-    return event;
-  },
-  async updateEvent(id, input) {
-    await delay(450);
-    validateEventInput(input);
-    const event: CalendarEvent = {
-      ...requireMockEvent(id),
-      ...input,
-      title: input.title.trim(),
-      syncStatus: "synced",
-      updatedAt: new Date().toISOString(),
-    };
-    mockDb.set(id, event);
-    return event;
-  },
-  async deleteEvent(payload) {
-    await delay(400);
-    requireMockEvent(payload.evento_id);
-    mockDb.delete(payload.evento_id);
-  },
-};
 
 // ---------------------------------------------------------------------------
 // HTTP implementation. Responses follow the agents' `RespostaAgente` envelope.
@@ -146,11 +88,4 @@ const httpCalendarService: CalendarService = {
   },
 };
 
-/** Clears the in-memory mock calendar (used on sign-out). No-op against the real backend. */
-export function resetMockCalendar(): void {
-  mockDb.clear();
-}
-
-export const calendarService: CalendarService = USE_MOCKS
-  ? mockCalendarService
-  : httpCalendarService;
+export const calendarService: CalendarService = httpCalendarService;

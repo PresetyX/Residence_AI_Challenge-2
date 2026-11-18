@@ -1,5 +1,5 @@
 import type { ConsentRecord, User } from "@/lib/types";
-import { USE_MOCKS, delay, request } from "./http";
+import { request } from "./http";
 
 /** Scopes requested from Google: identity plus read/write access to Calendar. */
 export const GOOGLE_OAUTH_SCOPES = [
@@ -23,22 +23,6 @@ export interface AuthService {
   signOut(): Promise<void>;
 }
 
-const MOCK_USER: User = {
-  id: "user_mock_01",
-  name: "Marina Albuquerque",
-  email: "marina.albuquerque@gmail.com",
-};
-
-const mockAuthService: AuthService = {
-  async signInWithGoogle() {
-    await delay(1100);
-    return { user: MOCK_USER, grantedScopes: [...GOOGLE_OAUTH_SCOPES] };
-  },
-  async signOut() {
-    await delay(150);
-  },
-};
-
 /**
  * Expected backend contract:
  *   POST /auth/google/session { consent, scopes } -> AuthSession
@@ -59,4 +43,4 @@ const httpAuthService: AuthService = {
   },
 };
 
-export const authService: AuthService = USE_MOCKS ? mockAuthService : httpAuthService;
+export const authService: AuthService = httpAuthService;

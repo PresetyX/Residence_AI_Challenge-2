@@ -6,8 +6,7 @@ import type {
   ProjectPlan,
 } from "@/lib/types";
 import { type EventDto, toCalendarEvent } from "./contracts";
-import { API_BASE_URL, ApiError, USE_CHAT_API } from "./http";
-import { mockStreamChat } from "./mocks/mock-supervisor";
+import { API_BASE_URL, ApiError } from "./http";
 import { expectProjectDescription, projectPlannerStream, routeToProjectPlanner } from "./project-planner";
 
 export interface InferenceMessage {
@@ -108,9 +107,7 @@ const httpInferenceService: InferenceService = {
   },
 };
 
-const supervisor: InferenceService = USE_CHAT_API
-  ? httpInferenceService
-  : { streamChat: mockStreamChat };
+const supervisor: InferenceService = httpInferenceService;
 
 /** Project requests go to the backend planner; everything else to the Supervisor. */
 export const inferenceService: InferenceService = {

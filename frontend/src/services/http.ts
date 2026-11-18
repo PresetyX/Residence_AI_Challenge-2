@@ -1,26 +1,5 @@
-/**
- * Shared plumbing for the service layer.
- *
- * Every service checks USE_MOCKS: when true it answers from the in-browser mocks,
- * otherwise it calls the backend through `request`. The real backend is the default;
- * set NEXT_PUBLIC_USE_MOCKS=true to run auth and calendar offline.
- */
+/** Shared plumbing for the service layer: every service calls the backend through `request`. */
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
-
-/**
- * The project planner (POST /projetos) is the one backend route that exists today, so it
- * has its own switch: on by default, even while auth, chat and calendar stay on mocks.
- * Set NEXT_PUBLIC_USE_PLANNER_API=false to plan projects with the in-browser mock.
- */
-export const USE_PLANNER_API = process.env.NEXT_PUBLIC_USE_PLANNER_API !== "false";
-
-/**
- * The chat (POST /chat/stream) talks to the backend Supervisor, which runs on Ollama. On by
- * default, like the planner. Set NEXT_PUBLIC_USE_CHAT_API=false to chat with the in-browser mock.
- */
-export const USE_CHAT_API = process.env.NEXT_PUBLIC_USE_CHAT_API !== "false";
 
 export class ApiError extends Error {
   constructor(
@@ -81,25 +60,6 @@ export async function readErrorDetail(response: Response): Promise<string | null
     // Not JSON: fall back to the generic message.
   }
   return null;
-}
-
-/** Simulated network latency for the mocks. Rejects with AbortError when aborted. */
-export function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new DOMException("Aborted", "AbortError"));
-      return;
-    }
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(new DOMException("Aborted", "AbortError"));
-      },
-      { once: true },
-    );
-  });
 }
 
 export function isAbortError(error: unknown): boolean {
