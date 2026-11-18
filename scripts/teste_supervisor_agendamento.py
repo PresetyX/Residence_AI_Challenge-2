@@ -27,7 +27,9 @@ def main():
     if resposta["status"] != "confirmacao":
         return
 
-    print("PRÉVIA DO CRONOGRAMA (NADA FOI CRIADO AINDA):")
+    classificacao = resposta.get("classificacao", "indefinido").upper()
+    print("CLASSIFICACAO DO PRAZO:", classificacao)
+    print("\nPREVIA DO CRONOGRAMA (NADA FOI CRIADO AINDA):")
     for evento in resposta["dados"]["eventos"]:
         inicio = datetime.fromisoformat(evento["inicio"])
         fim = datetime.fromisoformat(evento["fim"])
