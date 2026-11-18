@@ -15,13 +15,18 @@ import {
   parseGoal,
   resetMockSupervisor,
 } from "./mocks/mock-supervisor";
-import { projectService } from "./project-service";
+import { ApiError } from "./http";
+import { NOT_UNDERSTOOD, projectService } from "./project-service";
 
 /** Project described in an earlier turn, waiting for its deadline. */
 let pendingProject: string | null = null;
 
+/** Project the planner did not understand: the next message adds details, same deadline. */
+let awaitingDetails: { description: string; deadline: Date } | null = null;
+
 export function resetProjectPlanner(): void {
   pendingProject = null;
+  awaitingDetails = null;
 }
 
 const normalize = (text: string) =>
@@ -130,7 +135,12 @@ export function routeToProjectPlanner(text: string): boolean {
   const hasDeadline = parseDeadline(text) !== null;
 
   if (pendingProject && hasDeadline) return true;
-  if (SINGLE_ITEM.test(t)) return false;
+  if (SINGLE_ITEM.test(t)) {
+    awaitingDetails = null;
+    return false;
+  }
+  if (awaitingDetails && !HOURS.test(t)) return true;
+  awaitingDetails = null;
 
   if (HOURS.test(t)) {
     if (pendingProject) {
@@ -169,8 +179,15 @@ export async function* projectPlannerStream(
   signal?: AbortSignal,
 ): AsyncGenerator<InferenceChunk> {
   const now = new Date();
-  const deadline = parseDeadline(text, now);
-  const description = pendingProject && !PROJECT.test(normalize(text)) ? pendingProject : text;
+  const details = awaitingDetails;
+  awaitingDetails = null;
+  const deadline = parseDeadline(text, now) ?? details?.deadline ?? null;
+  const description = details
+    ? `${details.description}
+${text}`
+    : pendingProject && !PROJECT.test(normalize(text))
+      ? pendingProject
+      : text;
 
   if (!deadline) {
     pendingProject = description;
@@ -195,7 +212,17 @@ export async function* projectPlannerStream(
     type: "status",
     value: "Dividindo o projeto em etapas e estimando os story points. Isso pode levar alguns minutos…",
   };
-  const plan = await projectService.planProject(description, toIsoDate(deadline), signal);
+  let plan: ProjectPlan;
+  try {
+    plan = await projectService.planProject(description, toIsoDate(deadline), signal);
+  } catch (error) {
+    if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
+      awaitingDetails = { description, deadline };
+      yield { type: "token", value: error.message };
+      return;
+    }
+    throw error;
+  }
   yield { type: "token", value: summarize(plan) };
   yield { type: "project_plan", plan };
 }
