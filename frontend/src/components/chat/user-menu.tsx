@@ -11,8 +11,6 @@ import { useAuthStore } from "@/store/auth-store";
 import { useCalendarStore } from "@/store/calendar-store";
 import { useChatStore } from "@/store/chat-store";
 import { useUiStore } from "@/store/ui-store";
-import { resetMockCalendar } from "@/services/calendar-service";
-import { resetMockSupervisor } from "@/services/mocks/mock-supervisor";
 
 export function Avatar({ user, size = "size-9" }: { user: User; size?: string }) {
   if (user.avatarUrl) {
@@ -50,8 +48,6 @@ export function UserMenu({ user }: { user: User }) {
     useChatStore.getState().resetConversation();
     useUiStore.getState().closePanel();
     useCalendarStore.getState().reset();
-    resetMockCalendar();
-    resetMockSupervisor();
     await signOut();
     router.replace("/");
   }

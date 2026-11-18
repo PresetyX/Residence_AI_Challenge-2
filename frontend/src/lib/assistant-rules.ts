@@ -7,12 +7,11 @@
  * The AI only touches the calendar as part of a plan: breaking a goal into slots,
  * re-fitting the slots when the available time changes, or clearing a plan.
  *
- * SYSTEM_PROMPT is sent with every inference request so the real model follows the
- * same rules the mock Supervisor implements.
+ * SYSTEM_PROMPT is sent with every chat request (POST /chat/stream) to the backend Supervisor.
  */
 
 /** Reply the AI gives to a direct create/edit/delete command. */
-export const DIRECT_COMMAND_REFUSAL =
+const DIRECT_COMMAND_REFUSAL =
   "O Destrava foi feito para te ajudar a combater a procrastinação e organizar planos complexos! Para compromissos simples, use o painel manual. Me diga qual meta ou projeto você quer destravar hoje!";
 
 export const SYSTEM_PROMPT = `Você é o Destrava, um assistente que combate a procrastinação e resolve problemas complexos de gestão de tempo. Responda sempre em português do Brasil.
