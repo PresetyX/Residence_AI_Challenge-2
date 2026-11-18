@@ -2,12 +2,12 @@
  * Shared plumbing for the service layer.
  *
  * Every service checks USE_MOCKS: when true it answers from the in-browser mocks,
- * otherwise it calls the backend through `request`. Swapping to the real backend is
- * a matter of setting NEXT_PUBLIC_USE_MOCKS=false and NEXT_PUBLIC_API_URL.
+ * otherwise it calls the backend through `request`. The real backend is the default;
+ * set NEXT_PUBLIC_USE_MOCKS=true to run auth and calendar offline.
  */
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS !== "false";
+export const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "true";
 
 /**
  * The project planner (POST /projetos) is the one backend route that exists today, so it
@@ -34,11 +34,21 @@ export class ApiError extends Error {
 }
 
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
-    ...init,
-    headers: { "Content-Type": "application/json", ...init.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      credentials: "include",
+      ...init,
+      headers: { "Content-Type": "application/json", ...init.headers },
+    });
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    // fetch() rejects with a TypeError when the server is down or CORS blocks the call.
+    throw new ApiError(
+      `Não consegui falar com o backend em ${API_BASE_URL}. Verifique se ele está rodando (uvicorn backend.main:app).`,
+      "NetworkError",
+    );
+  }
 
   if (!response.ok) {
     throw new ApiError(

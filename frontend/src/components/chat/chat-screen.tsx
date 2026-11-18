@@ -6,6 +6,8 @@ import { useEffect } from "react";
 import { EventSidebar } from "@/components/sidebar/event-sidebar";
 import { Toaster } from "@/components/ui/toaster";
 import { useAuthStore } from "@/store/auth-store";
+import { useCalendarStore } from "@/store/calendar-store";
+import { toast } from "@/store/toast-store";
 import { useUiStore } from "@/store/ui-store";
 import { ChatHeader } from "./chat-header";
 import { Composer } from "./composer";
@@ -21,6 +23,16 @@ export function ChatScreen() {
   useEffect(() => {
     if (hydrated && !user) router.replace("/");
   }, [hydrated, user, router]);
+
+  // Fill the Agenda panel with the user's Google Calendar once signed in.
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId) return;
+    useCalendarStore
+      .getState()
+      .loadEvents()
+      .catch((error: Error) => toast.error(error.message));
+  }, [userId]);
 
   if (!hydrated || !user) {
     return (

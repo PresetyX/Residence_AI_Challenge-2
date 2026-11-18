@@ -8,6 +8,8 @@ interface CalendarState {
   /** Client cache of events touched in this session, keyed by id. */
   events: Record<string, CalendarEvent>;
   deletedIds: Record<string, true>;
+  /** Fetches the user's calendar from the backend and merges it into the cache. */
+  loadEvents: () => Promise<void>;
   /** Applies a mutation performed by the AI during a chat turn. */
   applyAction: (action: CalendarAction) => void;
   /** Manual creation from the Agenda panel. Resolves with the new event's id. */
@@ -24,6 +26,22 @@ const toMessage = (error: unknown, fallback: string) =>
 export const useCalendarStore = create<CalendarState>()((set, get) => ({
   events: {},
   deletedIds: {},
+
+  async loadEvents() {
+    try {
+      const loaded = await calendarService.listEvents();
+      set((state) => {
+        const events = { ...state.events };
+        for (const event of loaded) {
+          // Keep local edits that are still syncing.
+          if (events[event.id]?.syncStatus !== "pending") events[event.id] = event;
+        }
+        return { events };
+      });
+    } catch (error) {
+      throw new Error(toMessage(error, "Não foi possível carregar a agenda."));
+    }
+  },
 
   applyAction(action) {
     if (action.type === "deleted") {

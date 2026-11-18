@@ -78,6 +78,21 @@ npm run dev
 
 O chat chama `POST /projetos` quando o usuário descreve um projeto com prazo.
 
+O frontend usa o backend real por padrão (veja `frontend/.env.example`):
+
+| Rota | Quem atende |
+|---|---|
+| `POST /auth/google/session`, `POST /auth/logout` | Login: OAuth do Google (abre o navegador na 1ª vez e salva `token_calendar.json`) |
+| `GET /calendar/events`, `GET /calendar/events/{id}` | Painel Agenda: eventos do Google Agenda (ontem até +60 dias) |
+| `POST /calendar/events` | Agente de criação |
+| `PUT /calendar/events/{id}` | Agente de edição |
+| `DELETE /calendar/events/{id}` | Agente de exclusão |
+| `POST /chat/stream` | Chat com o Supervisor (Ollama) |
+| `POST /projetos` | Planejador + story points |
+
+Para rodar o front sem conta Google, use `NEXT_PUBLIC_USE_MOCKS=true` em `frontend/.env.local`.
+O CORS aceita qualquer porta de `localhost` (o Next.js usa a 3001 se a 3000 estiver ocupada).
+
 Para criar um projeto, envie o texto e o prazo para `POST /projetos`:
 
 ```

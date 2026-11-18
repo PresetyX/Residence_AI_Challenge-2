@@ -199,3 +199,42 @@ def listar_eventos(
         token_pagina = resultado_eventos.get("nextPageToken")
         if not token_pagina:
             return eventos
+
+
+def obter_evento(
+    servico: Resource,
+    id_evento: str,
+    *,
+    id_calendario: str = "primary",
+) -> dict[str, Any]:
+    """Devolve um evento pelo ID, no formato bruto da API do Google.
+
+    Raises:
+        googleapiclient.errors.HttpError: 404/410 se o evento não existir.
+    """
+    return servico.events().get(calendarId=id_calendario, eventId=id_evento).execute()
+
+
+def atualizar_evento(
+    servico: Resource,
+    id_evento: str,
+    alteracoes: dict[str, Any],
+    *,
+    id_calendario: str = "primary",
+) -> dict[str, Any]:
+    """Altera só os campos informados (PATCH) e devolve o evento atualizado."""
+    return (
+        servico.events()
+        .patch(calendarId=id_calendario, eventId=id_evento, body=alteracoes)
+        .execute()
+    )
+
+
+def excluir_evento(
+    servico: Resource,
+    id_evento: str,
+    *,
+    id_calendario: str = "primary",
+) -> None:
+    """Exclui o evento pelo ID."""
+    servico.events().delete(calendarId=id_calendario, eventId=id_evento).execute()
