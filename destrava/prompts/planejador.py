@@ -75,7 +75,7 @@ PEDIDO NÃO ENTENDIDO:
 - Só use esta saída quando a ENTRADA claramente não descrever um projeto de
   software que você consiga dividir (texto sem sentido, cumprimento, pedido fora
   do assunto). Se der para planejar, planeje.
-- Nesse caso não invente tarefas. Retorne somente {{" ": true}}.
+- Nesse caso não invente tarefas. Retorne somente {{"nao_entendi": true}}.
 """
 
 _SAIDA_EXEMPLO = """Exemplo de saída para o projeto de agenda de consultas (só mostra o formato; o
