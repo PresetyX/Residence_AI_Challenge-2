@@ -77,14 +77,21 @@ def test_cronograma_parcial_envia_os_eventos_que_foram_criados():
 
 def test_funcao_indisponivel_sugere_painel_manual():
     linhas = _conversar(_cliente(SupervisorFalso(
-        {"status": "indisponivel", "acao": "planejar", "mensagem": "Ainda não."}
-    )), ("usuario", "planeje"))
+        {"status": "indisponivel", "acao": "editar", "mensagem": "Ainda não."}
+    )), ("usuario", "mude minha reunião"))
     assert linhas[-1] == {"tipo": "sugerir_painel_manual"}
 
-    linhas = _conversar(_cliente(SupervisorFalso(
-        {"status": "indisponivel", "acao": "fora_escopo", "mensagem": "Posso ajudar com a agenda."}
-    )), ("usuario", "qual a capital da França?"))
-    assert {"tipo": "sugerir_painel_manual"} not in linhas
+
+def test_fora_do_escopo_responde_como_o_planejador_e_pede_o_projeto():
+    from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI
+
+    for acao, pedido in (("fora_escopo", "banana com azeite"), ("planejar", "planeje")):
+        linhas = _conversar(_cliente(SupervisorFalso(
+            {"status": "indisponivel", "acao": acao, "mensagem": "Posso ajudar com a agenda."}
+        )), ("usuario", pedido))
+        assert _texto(linhas) == MENSAGEM_NAO_ENTENDI
+        assert linhas[-1] == {"tipo": "pedir_projeto"}
+        assert {"tipo": "sugerir_painel_manual"} not in linhas
 
 
 def test_excecao_no_supervisor_vira_mensagem_e_nao_derruba_o_stream():

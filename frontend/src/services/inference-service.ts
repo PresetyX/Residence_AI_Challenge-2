@@ -8,7 +8,7 @@ import type {
 import { type EventDto, toCalendarEvent } from "./contracts";
 import { API_BASE_URL, ApiError, USE_CHAT_API } from "./http";
 import { mockStreamChat } from "./mocks/mock-supervisor";
-import { projectPlannerStream, routeToProjectPlanner } from "./project-planner";
+import { expectProjectDescription, projectPlannerStream, routeToProjectPlanner } from "./project-planner";
 
 export interface InferenceMessage {
   role: MessageRole;
@@ -43,9 +43,10 @@ type StreamLineDto =
   | { tipo: "token"; valor: string }
   | { tipo: "status"; valor: string }
   | { tipo: "acao_agenda"; acao: CalendarActionType; evento: EventDto }
-  | { tipo: "sugerir_painel_manual" };
+  | { tipo: "sugerir_painel_manual" }
+  | { tipo: "pedir_projeto" };
 
-function toChunk(line: StreamLineDto): InferenceChunk {
+function toChunk(line: Exclude<StreamLineDto, { tipo: "pedir_projeto" }>): InferenceChunk {
   if (line.tipo === "token") return { type: "token", value: line.valor };
   if (line.tipo === "status") return { type: "status", value: line.valor };
   if (line.tipo === "sugerir_painel_manual") return { type: "suggest_manual_panel" };
@@ -54,6 +55,16 @@ function toChunk(line: StreamLineDto): InferenceChunk {
     type: "calendar_action",
     action: { type: line.acao, eventId: snapshot.id, snapshot },
   };
+}
+
+/** "pedir_projeto" is routing state, not a chunk: the next message goes to the planner. */
+function* handleLine(raw: string): Generator<InferenceChunk> {
+  const line = JSON.parse(raw) as StreamLineDto;
+  if (line.tipo === "pedir_projeto") {
+    expectProjectDescription();
+    return;
+  }
+  yield toChunk(line);
 }
 
 /**
@@ -90,10 +101,10 @@ const httpInferenceService: InferenceService = {
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
       for (const line of lines) {
-        if (line.trim()) yield toChunk(JSON.parse(line) as StreamLineDto);
+        if (line.trim()) yield* handleLine(line);
       }
     }
-    if (buffer.trim()) yield toChunk(JSON.parse(buffer) as StreamLineDto);
+    if (buffer.trim()) yield* handleLine(buffer);
   },
 };
 
