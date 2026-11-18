@@ -42,8 +42,19 @@ export function expectProjectDescription(): void {
 /** Calendar questions keep going to the Supervisor even right after a "não entendi". */
 const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*|amanha|hoje)\b/;
 
+/** Plan already made for `pendingProject` (without a deadline yet), reused once it arrives. */
+let pendingDraft: ProjectPlan | null = null;
+
+/** Deadline sent to the planner while the user has not given one (it only frames the plan). */
+function provisionalDeadline(now: Date): Date {
+  const date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  date.setDate(date.getDate() + 30);
+  return date;
+}
+
 export function resetProjectPlanner(): void {
   pendingProject = null;
+  pendingDraft = null;
   awaitingDetails = null;
   pendingSchedule = null;
   if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
@@ -251,23 +262,20 @@ export async function* projectPlannerStream(
   const details = awaitingDetails;
   awaitingDetails = null;
   const deadline = parseDeadline(text, now) ?? details?.deadline ?? null;
+  // A date answering "qual é o prazo?" belongs to the project described before.
+  const answersDeadline = pendingProject !== null && deadline !== null && !PROJECT.test(normalize(text));
   const description = details
     ? `${details.description}\n${text}`
-    : pendingProject && !PROJECT.test(normalize(text))
+    : answersDeadline && pendingProject
       ? pendingProject
       : text;
+  const draft = answersDeadline ? pendingDraft : null;
+  pendingProject = null;
+  pendingDraft = null;
 
-  if (!deadline) {
+  if (deadline && isPast(deadline, now)) {
     pendingProject = description;
-    yield {
-      type: "token",
-      value:
-        "Bora destravar esse projeto! Qual é o **prazo de entrega**? Pode ser uma data (*31/12/2026*) ou um tempo (*em 6 semanas*).",
-    };
-    return;
-  }
-  if (isPast(deadline, now)) {
-    pendingProject = description;
+    pendingDraft = draft;
     yield {
       type: "token",
       value: `Esse prazo (**${longDate(toIsoDate(deadline))}**) já passou. Qual é a nova data de entrega?`,
@@ -275,22 +283,44 @@ export async function* projectPlannerStream(
     return;
   }
 
-  pendingProject = null;
-  yield {
-    type: "status",
-    value: "Dividindo o projeto em etapas e estimando os story points. Isso pode levar alguns minutos…",
-  };
   let plan: ProjectPlan;
-  try {
-    plan = await projectService.planProject(description, toIsoDate(deadline), signal);
-  } catch (error) {
-    if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
-      awaitingDetails = { description, deadline };
-      yield { type: "token", value: error.message };
-      return;
+  if (draft && deadline) {
+    // The planner already split this project while we waited for the deadline.
+    plan = { ...draft, deadline: toIsoDate(deadline) };
+  } else {
+    // Without a deadline the planner still runs (with a provisional one): it is the one
+    // that tells a real project from "banana com azeite".
+    yield {
+      type: "status",
+      value: "Dividindo o projeto em etapas e estimando os story points. Isso pode levar alguns minutos…",
+    };
+    try {
+      plan = await projectService.planProject(
+        description,
+        toIsoDate(deadline ?? provisionalDeadline(now)),
+        signal,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
+        if (deadline) awaitingDetails = { description, deadline };
+        else awaitingProject = true;
+        yield { type: "token", value: error.message };
+        return;
+      }
+      throw error;
     }
-    throw error;
   }
+
+  if (!deadline) {
+    pendingProject = description;
+    pendingDraft = plan;
+    yield {
+      type: "token",
+      value: `Bora destravar esse projeto! Já dividi em **${plan.tasks.length} etapas**. Qual é o **prazo de entrega**? Pode ser uma data (*31/12/2026*) ou um tempo (*em 6 semanas*).`,
+    };
+    return;
+  }
+
   pendingSchedule = { plan, goal: goalFromDescription(description) };
   yield {
     type: "token",
