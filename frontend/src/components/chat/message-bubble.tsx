@@ -1,7 +1,8 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CalendarPlus, CircleAlert, Sparkles } from "lucide-react";
+import { CalendarPlus, CircleAlert } from "lucide-react";
+import { LogoMark } from "@/components/ui/logo";
 import { memo } from "react";
 import { formatTime } from "@/lib/format";
 import { getModel } from "@/lib/models";
@@ -55,11 +56,11 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
     >
       <span
         aria-hidden="true"
-        className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-violet-800 ${
+        className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-ink-950 ring-1 ring-violet-500/60 ${
           isStreaming ? "animate-pulse shadow-[0_0_22px_rgb(189_147_249/0.9)]" : ""
         }`}
       >
-        <Sparkles className="size-4" />
+        <LogoMark className="h-5" />
       </span>
 
       <div className="min-w-0 flex-1">

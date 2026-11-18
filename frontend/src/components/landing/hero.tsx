@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GoogleIcon } from "@/components/ui/google-icon";
+import { LogoMark } from "@/components/ui/logo";
 import type { SignInProps } from "./landing-page";
 
 const BADGES = [
@@ -149,8 +150,8 @@ function ChatPreview() {
             Monte um plano para eu fazer meu TCC, tenho 10 horas livres esta semana
           </div>
           <div className="flex gap-3">
-            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-gradient-to-br from-violet-500 to-violet-800">
-              <Sparkles className="size-4" />
+            <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-ink-950 ring-1 ring-violet-500/60">
+              <LogoMark className="h-5" />
             </span>
             <div className="min-w-0 flex-1 space-y-3">
               <p className="text-sm leading-relaxed text-slate-200">
