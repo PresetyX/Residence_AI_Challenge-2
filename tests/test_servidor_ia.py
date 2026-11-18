@@ -377,6 +377,22 @@ def test_projeto_no_modo_local_faz_um_lote_so():
     assert estimador.chamadas == 1
 
 
+
+def test_projeto_que_a_ia_nao_entendeu_pede_detalhes():
+    from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI, PedidoNaoEntendido
+
+    class PlanejadorConfuso:
+        def executar(self, texto, prazo):
+            raise PedidoNaoEntendido()
+
+    estimador = PredictorFalso()
+    main.app.state.planejador = PlanejadorConfuso()
+    main.app.state.story_points_predictor = estimador
+    resposta = TestClient(main.app).post("/projetos", json={"texto": "asdf", "prazo": "2026-12-31"})
+    assert resposta.status_code == 200
+    assert resposta.json() == {"prazo": "2026-12-31", "tarefas": [], "nao_entendi": True, "mensagem": MENSAGEM_NAO_ENTENDI}
+    assert estimador.chamadas == 0
+
 # ------------------------------------- backend/servidor_story_points.py
 
 

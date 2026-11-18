@@ -27,7 +27,13 @@ export interface ProjectTaskDto {
 export interface ProjectPlanDto {
   prazo: string;
   tarefas: ProjectTaskDto[];
+  /** The planner could not make sense of the project; `mensagem` asks for details. */
+  nao_entendi?: boolean;
+  mensagem?: string;
 }
+
+/** Kind of the ApiError thrown when the planner asks for more details. */
+export const NOT_UNDERSTOOD = "NotUnderstood";
 
 export function toProjectTask(dto: ProjectTaskDto): ProjectTask {
   return {
@@ -63,6 +69,9 @@ const httpProjectService: ProjectService = {
       );
     }
 
+    if (dto?.nao_entendi) {
+      throw new ApiError(dto.mensagem ?? "Não entendi. Pode descrever o projeto com mais detalhes?", NOT_UNDERSTOOD);
+    }
     if (!Array.isArray(dto?.tarefas) || dto.tarefas.length === 0) {
       throw new ApiError("O planejador não devolveu nenhuma etapa. Tente descrever o projeto com mais detalhes.", "EmptyPlan");
     }

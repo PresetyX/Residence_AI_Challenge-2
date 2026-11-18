@@ -9,6 +9,7 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.agents.criar import AgenteCriar
+from destrava.agents.planejador import PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
@@ -219,6 +220,14 @@ class AgenteSupervisor:
 
             if any(not tarefa.titulo.strip() for tarefa in tarefas):
                 raise ValueError("Existe uma tarefa com título vazio.")
+
+        except PedidoNaoEntendido as erro:
+            # O Planejador não entendeu o projeto: pede mais detalhes ao usuário.
+            return {
+                "status": "esclarecimento",
+                "acao": "planejar",
+                "mensagem": str(erro)
+            }
 
         except (ValidationError, ValueError, TypeError) as erro:
             return {

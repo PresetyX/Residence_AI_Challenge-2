@@ -10,7 +10,7 @@ import uvicorn
 from backend.calendario import router as calendario_router
 from backend.chat import router as chat_router
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
-from destrava.agents.planejador import AgentePlanejador, ErroPlanejador
+from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
 from destrava.core import config
 from destrava.rag import obter_rag
 
@@ -89,6 +89,10 @@ def criar_projeto(
     planejador: AgentePlanejador = request.app.state.planejador
     try:
         plano = planejador.executar(projeto.texto, projeto.prazo)
+    except PedidoNaoEntendido as erro:
+        # A IA não entendeu o projeto: o frontend mostra a pergunta e espera
+        # mais detalhes (mesmo prazo).
+        return {"prazo": projeto.prazo, "tarefas": [], "nao_entendi": True, "mensagem": str(erro)}
     except ErroPlanejador as erro:
         # A IA respondeu, mas fora do contrato esperado.
         raise HTTPException(status_code=502, detail=str(erro)) from erro
