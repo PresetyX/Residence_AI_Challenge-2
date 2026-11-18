@@ -54,7 +54,8 @@ def _numero_do_ambiente(nome: str, padrao: float) -> float:
 # Em desenvolvimento, o Ollama roda na própria máquina. Com o servidor de IA
 # compartilhado, cada pessoa aponta OLLAMA_URL para o PC com a GPU (pela
 # Tailscale) e não baixa modelo nenhum. Ex.: MODELO=gemma4:12b-it-q4_K_M.
-MODELO = _texto_do_ambiente("MODELO", "gemma4:12b-it-q4_K_M")
+# Padrão do Planejador: gemma4:e2b (a mesma tag que o servidor de IA baixa).
+MODELO = _texto_do_ambiente("MODELO", "gemma4:e2b-it-q4_K_M")
 # Padrão: o servidor de IA compartilhado (PC com a GPU, IP da Tailscale).
 # Para usar um Ollama na própria máquina: OLLAMA_URL=http://localhost:11434.
 OLLAMA_URL = _texto_do_ambiente("OLLAMA_URL", "http://100.109.62.93:11434")

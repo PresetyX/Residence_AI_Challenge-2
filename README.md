@@ -199,7 +199,7 @@ Todas são opcionais. Sem elas, vale o padrão do `destrava/core/config.py` (tud
 | Variável | Padrão | Para que serve |
 |---|---|---|
 | `OLLAMA_URL` | `http://localhost:11434` | Endereço do Ollama (no time: `http://<ip-tailscale-do-servidor>:11434`) |
-| `MODELO` | `gemma2:2b` | Modelo de chat do Ollama (no servidor: `gemma4:12b-it-q4_K_M`) |
+| `MODELO` | `gemma4:e2b-it-q4_K_M` | Modelo do Planejador e do Supervisor (o chat usa o modelo do seletor) |
 | `MODELO_EMBEDDING` | `nomic-embed-text` | Modelo de embeddings do RAG |
 | `STORY_POINTS_URL` | vazio (modo local) | Endereço do serviço de story points (`http://<ip-tailscale-do-servidor>:8001`) |
 | `TIMEOUT_LLM` | `300` | Segundos de espera pela resposta do modelo. Com várias pessoas na mesma GPU os pedidos fazem fila: aumente se aparecer erro de tempo esgotado |
