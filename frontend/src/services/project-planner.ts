@@ -86,12 +86,15 @@ const longDate = (isoDate: string) => formatLongDate(`${isoDate}T12:00:00`);
 
 function summarize(plan: ProjectPlan): string {
   const total = plan.tasks.reduce((sum, task) => sum + task.storyPoints, 0);
+  const minutes = plan.tasks.reduce((sum, task) => sum + (task.estimatedMinutes ?? task.storyPoints * 60), 0);
+  const perPoint = total > 0 ? Math.round(minutes / total) : 60;
+  const hours = Math.round((minutes / 60) * 10) / 10;
   const days = Math.round(
     (Date.parse(`${plan.deadline}T12:00:00`) - Date.now()) / (24 * 60 * 60 * 1000),
   );
   const first = plan.tasks[0];
   return [
-    `Montei um plano em **${plan.tasks.length} etapas** para entregar até **${longDate(plan.deadline)}**${days > 0 ? ` (${days} dias)` : ""}. Esforço total estimado pela rede neural: **${total} story points** (≈ **${total} h** de trabalho, 1 story point = 60 min).`,
+    `Montei um plano em **${plan.tasks.length} etapas** para entregar até **${longDate(plan.deadline)}**${days > 0 ? ` (${days} dias)` : ""}. Esforço total estimado pela rede neural: **${total} story points** (≈ **${hours.toLocaleString("pt-BR")} h** de trabalho, 1 story point = ${perPoint} min).`,
     "",
     `Comece pela etapa 1, **${first.title}**: o mais difícil é dar o primeiro passo. Abra cada etapa no cartão abaixo para ver o objetivo, os entregáveis e a demonstração.`,
   ].join("\n");

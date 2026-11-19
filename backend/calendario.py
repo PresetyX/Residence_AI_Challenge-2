@@ -33,6 +33,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
+from backend import perfil
 from destrava.agents.criar import AgenteCriar
 from destrava.agents.editar import AgenteEditar, evento_resumido
 from destrava.agents.excluir import AgenteExcluir
@@ -219,6 +220,8 @@ def entrar(corpo: SessaoRequest) -> dict:
     # Guarda o que o usuário aceitou no modal, junto com a sessão.
     registro = {"email": email, "consent": corpo.consent, "registrado_em": datetime.now(config.FUSO).isoformat()}
     ARQUIVO_CONSENTIMENTO.write_text(json.dumps(registro, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Sono e calibração desta conta passam a valer para a agenda e os story points.
+    perfil.ativar_conta(email)
 
     return {
         "user": {"id": email, "name": nome, "email": email},

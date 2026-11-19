@@ -49,8 +49,7 @@ def test_calibracao_reinicia_media_e_contagem_de_tarefas():
     assert resposta == {"status": "sucesso"}
 
 
-def test_criar_projeto_converte_story_points_em_60_minutos_cada():
-    registrar_respostas_calibracao([15 * pontos for pontos in story_points_perguntas])
+def _criar_projeto_com_2_story_points():
 
     class PlanejadorFalso:
         def executar(self, texto, prazo):
@@ -85,8 +84,30 @@ def test_criar_projeto_converte_story_points_em_60_minutos_cada():
         request,
     )
 
-    # 2 story points x MINUTOS_POR_STORY_POINT (60, pomodoro.py), mesmo após calibrar.
-    assert resposta["tarefas"][0]["tempo_estimado_minutos"] == 120
+    return resposta["tarefas"][0]["tempo_estimado_minutos"]
+
+
+def test_sem_calibracao_cada_story_point_vale_60_minutos():
+    # 2 story points x MINUTOS_POR_STORY_POINT (60, pomodoro.py).
+    assert _criar_projeto_com_2_story_points() == 120
+
+
+def test_calibracao_define_os_minutos_de_cada_story_point():
+    registrar_respostas_calibracao([15 * pontos for pontos in story_points_perguntas])
+
+    assert _criar_projeto_com_2_story_points() == 30
+
+
+def test_calibracao_aceita_perguntas_puladas():
+    respostas = [None, *[45 * pontos for pontos in story_points_perguntas[1:4]], *[None] * 6]
+
+    assert registrar_respostas_calibracao(respostas) == {"status": "sucesso"}
+    assert _criar_projeto_com_2_story_points() == 90
+
+
+def test_calibracao_exige_tres_respostas():
+    with pytest.raises(HTTPException, match="pelo menos 3"):
+        registrar_respostas_calibracao([30, 60, *[None] * 8])
 
 
 def test_registrar_historico_rejeita_zero_story_points():

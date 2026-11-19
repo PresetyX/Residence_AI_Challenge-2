@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
 
 from backend.calendario import router as calendario_router
 from backend.chat import router as chat_router
+from backend import perfil
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
@@ -67,6 +68,8 @@ def _carregar_historico() -> None:
 
 async def lifespan(app: FastAPI):
     _carregar_historico()
+    # Sono e calibração da última conta que entrou (data/perfis.json).
+    perfil.ativar_conta_salva()
     # Com STORY_POINTS_URL definido, o estimador é só um cliente HTTP do
     # servidor de IA: nada de torch nem de BGE-M3 nesta máquina. Sem ele, o
     # modelo é carregado aqui (modo local, requirements-ia.txt).
@@ -104,6 +107,7 @@ app.add_middleware(
 )
 app.include_router(chat_router)
 app.include_router(calendario_router)
+app.include_router(perfil.router)
 
 
 @app.get("/")
@@ -384,8 +388,13 @@ def listar_perguntas_calibracao() -> dict[str, object]:
 
 @app.post("/calibracao", response_model=StatusResponse)
 def registrar_respostas_calibracao(
-    respostas: list[StrictInt],
+    respostas: list[StrictInt | None],
 ) -> dict[str, str]:
+    """Respostas das perguntas de calibração: minutos de cada tarefa, ou null (pulou).
+
+    A média de minutos por story point vira o tempo de cada story point da
+    conta ativa (pomodoro.MINUTOS_POR_STORY_POINT) e fica salva no perfil.
+    """
     if len(respostas) != len(story_points_perguntas):
         raise HTTPException(
             status_code=422,
@@ -394,28 +403,22 @@ def registrar_respostas_calibracao(
                 f"({len(story_points_perguntas)})."
             ),
         )
-    if any(resposta <= 0 for resposta in respostas):
+    if any(resposta is not None and resposta <= 0 for resposta in respostas):
         raise HTTPException(
             status_code=422,
             detail="As respostas devem ser tempos reais em minutos maiores que zero.",
         )
-
-    fatores_calibracao = [x / y for x, y in zip(respostas, story_points_perguntas)]
-    media_calibrada = sum(fatores_calibracao) / len(fatores_calibracao)
-    dp = (
-        sum(
-            (x - media_calibrada) ** 2
-            for x in fatores_calibracao
-        )
-        / len(fatores_calibracao)
-    ) ** 0.5
+    try:
+        media_calibrada = perfil.calcular_minutos_por_story_point(respostas, story_points_perguntas)
+    except ValueError as erro:
+        raise HTTPException(status_code=422, detail=str(erro)) from erro
 
     global media_minutos_por_story_point, _quantidade_observacoes_media
     with _LOCK_HISTORICO:
         media_minutos_por_story_point = media_calibrada
-        _quantidade_observacoes_media = len(fatores_calibracao)
+        _quantidade_observacoes_media = sum(resposta is not None for resposta in respostas)
         _salvar_historico()
-    
+    perfil.salvar_calibracao(media_calibrada, list(respostas))
+
     print(f"Média de minutos por story point: {media_minutos_por_story_point:.2f}")
-    print(f"Desvio padrão: {dp:.2f}")
     return {"status": "sucesso"}

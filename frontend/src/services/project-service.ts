@@ -20,7 +20,7 @@ export interface ProjectTaskDto {
   demonstracao: string;
   dependencia: number;
   story_points: number;
-  /** Minutes from the calibrated average (POST /calibracao and /historico). */
+  /** story_points x the user's minutes per story point (calibration, POST /calibracao). */
   tempo_estimado_minutos?: number;
 }
 
@@ -47,6 +47,7 @@ export function toProjectTask(dto: ProjectTaskDto): ProjectTask {
     demo: dto.demonstracao,
     dependsOn: dto.dependencia,
     storyPoints: dto.story_points,
+    estimatedMinutes: dto.tempo_estimado_minutos,
   };
 }
 
@@ -59,6 +60,7 @@ export function toTaskDto(task: ProjectTask): ProjectTaskDto {
     demonstracao: task.demo,
     dependencia: task.dependsOn,
     story_points: task.storyPoints,
+    ...(task.estimatedMinutes ? { tempo_estimado_minutos: task.estimatedMinutes } : {}),
   };
 }
 

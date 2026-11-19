@@ -27,6 +27,15 @@ def _proximo_minuto(valor: datetime) -> datetime:
     return valor
 
 
+def periodo_acordado(dia) -> tuple[datetime, datetime]:
+    """Do acordar do `dia` até a hora de dormir (no dia seguinte, se for após a meia-noite)."""
+    acordar = datetime.combine(dia, config.HORARIO_ACORDAR, tzinfo=config.FUSO)
+    dormir = datetime.combine(dia, config.HORARIO_DORMIR, tzinfo=config.FUSO)
+    if dormir <= acordar:
+        dormir += timedelta(days=1)
+    return acordar, dormir
+
+
 def _janelas_acordadas(livres: list[dict], agora: datetime) -> list[list[datetime]]:
     """Clipa blocos a partir de agora e separa por dia, entre acordar e dormir."""
     janelas = []
@@ -36,10 +45,11 @@ def _janelas_acordadas(livres: list[dict], agora: datetime) -> list[list[datetim
         if fim <= inicio:
             raise ValueError("Horario livre com fim anterior ao inicio.")
         inicio = max(inicio, agora)
-        dia = inicio.date()
+        # Começa um dia antes: quem dorme depois da meia-noite (ex.: 01h) ainda
+        # está no "dia" anterior até essa hora.
+        dia = inicio.date() - timedelta(days=1)
         while dia <= fim.date():
-            acordar = datetime.combine(dia, config.HORARIO_ACORDAR, tzinfo=config.FUSO)
-            dormir = datetime.combine(dia, config.HORARIO_DORMIR, tzinfo=config.FUSO)
+            acordar, dormir = periodo_acordado(dia)
             a, b = max(inicio, acordar), min(fim, dormir)
             if b > a:
                 janelas.append([a, b])

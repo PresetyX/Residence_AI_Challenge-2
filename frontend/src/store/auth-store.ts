@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import type { ConsentRecord, User } from "@/lib/types";
 import { authService } from "@/services/auth-service";
 import { ApiError } from "@/services/http";
+import { resetOnboarding } from "@/services/onboarding";
 
 type AuthStatus = "idle" | "loading" | "authenticated" | "error";
 
@@ -50,6 +51,7 @@ export const useAuthStore = create<AuthState>()(
         try {
           await authService.signOut();
         } finally {
+          resetOnboarding();
           set({ user: null, consent: null, status: "idle", error: null });
         }
       },

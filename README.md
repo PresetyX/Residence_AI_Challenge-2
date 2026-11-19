@@ -125,25 +125,38 @@ O notebook segue o mesmo fluxo: limpa o texto, gera embeddings BGE-M3, ajusta
 a PCA e o `StandardScaler` somente no conjunto de treino, treina uma MLP e
 exporta tudo em `modelos/rede_neural.pt`.
 
-Para calibrar a relação entre story points e tempo real, consulte as perguntas
-com `GET /calibracao` e envie uma lista com os 10 tempos, em minutos, na mesma
-ordem para `POST /calibracao`:
+### Primeira conversa: sono e calibração
+
+Na primeira vez que uma conta abre o chat, a IA faz duas rodadas de perguntas
+antes de qualquer pedido (`frontend/src/services/onboarding.ts`):
+
+1. **Sono:** que horas a pessoa dorme e acorda (texto livre: "11 da noite",
+   "meia-noite", "7h30"). Fica salvo na conta (`PUT /perfil/sono`) e substitui
+   `HORARIO_DORMIR`/`HORARIO_ACORDAR` do `config.py`: nada é agendado nesse
+   período, inclusive para quem dorme depois da meia-noite.
+2. **Calibração dos story points:** as 10 tarefas de `GET /calibracao` (story
+   points conhecidos, de 1 a 13). Para cada uma a pessoa diz quanto tempo
+   levaria ("2h", "90 min", "1 dia") ou responde "pular". O backend descarta
+   respostas mais de 3x fora da mediana e usa a média ponderada pelos pontos;
+   o resultado vira o tempo de cada story point da conta (sem calibração,
+   60 min, `pomodoro.py`). Mínimo de 3 respostas.
+
+Depois, "configurar sono" e "calibrar" no chat refazem cada rodada. O perfil
+fica em `data/perfis.json` (por e-mail) até o banco de dados dos story points
+ficar pronto (TODO em `backend/perfil.py`). Pela API:
 
 ```
-curl http://127.0.0.1:8000/calibracao
+curl "http://127.0.0.1:8000/perfil?email=voce@gmail.com"
+curl -X PUT http://127.0.0.1:8000/perfil/sono `
+  -H "Content-Type: application/json" `
+  -d '{"email": "voce@gmail.com", "dormir": "23:30", "acordar": "7h"}'
 curl -X POST http://127.0.0.1:8000/calibracao `
   -H "Content-Type: application/json" `
-  -d '[30, 70, 20, 80, 50, 100, 60, 10, 40, 130]'
+  -d '[30, 70, null, 80, 50, 100, 60, 10, 40, 130]'
 ```
 
-A resposta informa a média, o desvio padrão e o fator calculado para cada
-pergunta. Todos os tempos devem ser inteiros maiores que zero.
-
-O fator começa em 30 minutos por story point e a média considera inicialmente
-5 observações. Esses valores ficam persistidos em `data/historico.json`. Cada
-projeto converte os story points previstos em `tempo_estimado_minutos`. Ao
-registrar uma tarefa concluída com `POST /historico`, seu tempo real passa a
-compor a média com o mesmo peso de cada observação:
+Ao registrar uma tarefa concluída com `POST /historico`, o tempo real entra na
+média histórica de `data/historico.json` (base para o futuro banco):
 
 ```
 curl -X POST http://127.0.0.1:8000/historico `
