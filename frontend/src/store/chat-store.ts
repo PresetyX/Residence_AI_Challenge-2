@@ -7,6 +7,7 @@ import type { ChatMessage, ModelId } from "@/lib/types";
 import { ApiError, isAbortError, request } from "@/services/http";
 import { resetProjectPlanner } from "@/services/project-planner";
 import { inferenceService } from "@/services/inference-service";
+import { pendingOnboarding, startOnboarding } from "@/services/onboarding";
 import { useCalendarStore } from "./calendar-store";
 
 interface ChatState {
@@ -19,6 +20,8 @@ interface ChatState {
   sendMessage: (text: string) => Promise<void>;
   stopGenerating: () => void;
   resetConversation: () => void;
+  /** Opens the chat with the first-run questions (sleep, calibration) when the profile lacks them. */
+  beginOnboarding: (account: { email: string; name: string }) => Promise<void>;
 }
 
 // Kept outside the store: an AbortController is not serializable state.
@@ -140,10 +143,26 @@ export const useChatStore = create<ChatState>()(
           activeRequest?.abort();
         },
 
+        async beginOnboarding(account) {
+          const greeting = await startOnboarding(account);
+          if (!greeting || get().messages.length > 0) return;
+          const message: ChatMessage = {
+            id: createId("msg"),
+            role: "assistant",
+            content: greeting,
+            createdAt: new Date().toISOString(),
+            status: "done",
+          };
+          set({ messages: [message] });
+        },
+
         resetConversation() {
           activeRequest?.abort();
           void startOver();
           set({ messages: [], isGenerating: false, conversationEnded: false });
+          // Questions still unanswered: ask them again in the new, empty thread.
+          const account = pendingOnboarding();
+          if (account) void get().beginOnboarding(account).catch(() => undefined);
         },
       };
     },

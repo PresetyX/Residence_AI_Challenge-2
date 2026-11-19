@@ -15,7 +15,7 @@ from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
 from destrava.core.prazo import interpretar_prazo
-from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo
+from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo, periodo_acordado
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
 
@@ -166,10 +166,13 @@ def _horario_acordado(inicio: datetime, fim: datetime) -> bool:
     """Proteção adicional ao cálculo de sono existente no agenda_engine.py."""
     inicio = inicio.astimezone(config.FUSO)
     fim = fim.astimezone(config.FUSO)
-    # Rotina do MVP: horários acordado e dormir no MESMO dia (06h às 22h).
-    return (inicio.date() == fim.date()
-            and config.HORARIO_ACORDAR <= inicio.time().replace(tzinfo=None)
-            and fim.time().replace(tzinfo=None) <= config.HORARIO_DORMIR)
+    # O evento cabe inteiro num período acordado (do perfil do usuário). Quem
+    # dorme depois da meia-noite ainda está no período do dia anterior.
+    for dia in (inicio.date() - timedelta(days=1), inicio.date()):
+        acordar, dormir = periodo_acordado(dia)
+        if acordar <= inicio and fim <= dormir:
+            return True
+    return False
 
 
 class AgenteSupervisor:

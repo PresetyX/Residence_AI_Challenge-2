@@ -72,6 +72,8 @@ export interface ProjectTask {
   dependsOn: number;
   /** Effort estimated by the backend neural network. */
   storyPoints: number;
+  /** Work time: story points x the user's calibrated minutes per story point (60 by default). */
+  estimatedMinutes?: number;
 }
 
 export interface ProjectPlan {

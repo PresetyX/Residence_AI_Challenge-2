@@ -7,6 +7,7 @@ import type {
 } from "@/lib/types";
 import { type EventDto, toCalendarEvent } from "./contracts";
 import { API_BASE_URL, ApiError } from "./http";
+import { onboardingStream, routeToOnboarding } from "./onboarding";
 import { expectProjectDescription, projectPlannerStream, routeToProjectPlanner } from "./project-planner";
 
 export interface InferenceMessage {
@@ -113,10 +114,15 @@ const httpInferenceService: InferenceService = {
 
 const supervisor: InferenceService = httpInferenceService;
 
-/** Project requests go to the backend planner; everything else to the Supervisor. */
+/** Onboarding answers first, then project requests to the backend planner; everything else to the Supervisor. */
 export const inferenceService: InferenceService = {
   async *streamChat(request, signal) {
     const last = [...request.messages].reverse().find((message) => message.role === "user");
+    // First-run questions (sleep, story-point calibration) come before any agent.
+    if (last && routeToOnboarding(last.content)) {
+      yield* onboardingStream(last.content, signal);
+      return;
+    }
     if (last && routeToProjectPlanner(last.content)) {
       yield* projectPlannerStream(last.content, signal);
       return;

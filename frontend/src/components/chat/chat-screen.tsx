@@ -7,6 +7,7 @@ import { EventSidebar } from "@/components/sidebar/event-sidebar";
 import { Toaster } from "@/components/ui/toaster";
 import { useAuthStore } from "@/store/auth-store";
 import { useCalendarStore } from "@/store/calendar-store";
+import { useChatStore } from "@/store/chat-store";
 import { toast } from "@/store/toast-store";
 import { useUiStore } from "@/store/ui-store";
 import { ChatHeader } from "./chat-header";
@@ -33,6 +34,17 @@ export function ChatScreen() {
       .loadEvents()
       .catch((error: Error) => toast.error(error.message));
   }, [userId]);
+
+  // First visit of this account: ask the sleep hours and calibrate the story points.
+  const userEmail = user?.email;
+  const userName = user?.name;
+  useEffect(() => {
+    if (!userEmail) return;
+    useChatStore
+      .getState()
+      .beginOnboarding({ email: userEmail, name: userName ?? "" })
+      .catch((error: Error) => toast.error(error.message));
+  }, [userEmail, userName]);
 
   if (!hydrated || !user) {
     return (
