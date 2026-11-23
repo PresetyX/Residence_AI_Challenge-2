@@ -24,7 +24,7 @@ from destrava.rag import obter_rag
 from backend.database import (
     buscar_storypoints_evento,
     inicializar_banco_eventos,
-    salvar_eventos_sem_storypoints,
+    salvar_storypoints_eventos,
 )
 
 
@@ -256,12 +256,7 @@ def confirmar_agendamento(
 
         dados = resultado.get("dados")
         eventos_criados = dados.get("eventos_criados", []) if isinstance(dados, dict) else []
-        ids_eventos = [
-            evento["id"]
-            for evento in eventos_criados
-            if isinstance(evento, dict) and isinstance(evento.get("id"), str)
-        ]
-        salvar_eventos_sem_storypoints(ids_eventos)
+        salvar_storypoints_eventos(eventos_criados)
         return resultado
 
 
@@ -352,6 +347,8 @@ def registrar_historico(
         ) / total_observacoes
         _quantidade_observacoes_media = total_observacoes
         _salvar_historico()
+
+    print(f"Nova média de minutos por story point: {media_minutos_por_story_point:.2f}")
 
     return {"status": "sucesso"}
 

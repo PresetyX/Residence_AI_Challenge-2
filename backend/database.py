@@ -36,10 +36,17 @@ def buscar_storypoints_evento(id_evento: str) -> int | None:
     return None if resultado is None else resultado[0]
 
 
-def salvar_eventos_sem_storypoints(ids_eventos: list[str]) -> None:
+def salvar_storypoints_eventos(eventos: list[dict]) -> None:
     inicializar_banco_eventos()
+    registros = [
+        (evento["id"], evento.get("story_points", 0))
+        for evento in eventos
+        if isinstance(evento, dict)
+        and isinstance(evento.get("id"), str)
+        and isinstance(evento.get("story_points"), int)
+    ]
     with sqlite3.connect(CAMINHO_BANCO_EVENTOS) as conexao:
         conexao.executemany(
-            f"INSERT OR REPLACE INTO {TABELA_EVENTOS} (id, storypoints) VALUES (?, 0)",
-            ((id_evento,) for id_evento in ids_eventos),
+            f"INSERT OR REPLACE INTO {TABELA_EVENTOS} (id, storypoints) VALUES (?, ?)",
+            registros,
         )

@@ -72,7 +72,9 @@ def test_prevê_classifica_e_cria():
     resultado = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()
     assert resultado["status"] == "sucesso"
     assert len(criador.criados) == 2
-    assert all(buscar_storypoints_evento(evento["id"]) == 0 for evento in criador.criados)
+    assert buscar_storypoints_evento("e1") == 5
+    assert buscar_storypoints_evento("e2") == 3
+    assert [evento["story_points"] for evento in resultado["dados"]["eventos_criados"]] == [5, 3]
 
     # Outro "sim" não repete a criação.
     de_novo = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()

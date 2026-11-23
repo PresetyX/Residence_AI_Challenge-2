@@ -113,6 +113,7 @@ export interface ScheduleSlotDto {
   inicio: string;
   fim: string;
   descricao?: string;
+  story_points?: number;
 }
 
 export interface SchedulePreviewDto {

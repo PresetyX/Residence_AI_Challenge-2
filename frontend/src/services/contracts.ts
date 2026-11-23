@@ -22,6 +22,7 @@ export interface EventDto {
   titulo: string;
   inicio: string;
   fim: string;
+  story_points?: number;
   link?: string | null;
   descricao?: string | null;
   local?: string | null;

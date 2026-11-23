@@ -117,6 +117,9 @@ def encaixar_tarefas_pomodoro(
 
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
+        story_points = tarefa.get("story_points")
+        if not isinstance(story_points, int):
+            story_points = 0
         # Story points da rede neural x MINUTOS_POR_STORY_POINT (pomodoro.py).
         trabalho = minutos_de_trabalho(tarefa)
         for janela in janelas:
@@ -149,6 +152,7 @@ def encaixar_tarefas_pomodoro(
                     "inicio": inicio.isoformat(),
                     "fim": fim.isoformat(),
                     "descricao": descricao,
+                    "story_points": story_points,
                 })
                 if usar_pomodoro:
                     detalhes.append({"titulo": titulo, "sessoes": sessoes})

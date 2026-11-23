@@ -462,6 +462,8 @@ class AgenteSupervisor:
 
             try:
                 criado = resposta["dados"]["evento"]
+                story_points = evento.get("story_points")
+                criado["story_points"] = story_points if isinstance(story_points, int) else 0
                 criados.append(criado)
             except (KeyError, TypeError):
                 return {
