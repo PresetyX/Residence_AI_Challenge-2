@@ -1,12 +1,23 @@
 # Destrava (Residence_AI_Challenge-2)
 
-Agentes que trabalham com o Google Agenda. Hoje existem **dois agentes prontos, o de visualização e o de criação**. Eles serão chamados pelo **Supervisor**: cada um recebe um JSON e devolve um JSON, sem usar LLM.
+O Destrava é um assistente que planeja projetos e organiza o Google Agenda por chat. O usuário descreve o que quer fazer (ou um projeto com prazo) e o **Supervisor** interpreta o pedido, chama os agentes certos e só altera a agenda depois da confirmação.
+
+O sistema tem três partes:
+
+| Parte | O que é | Onde |
+|---|---|---|
+| Frontend | Interface web (Next.js): landing, login com Google, chat e painel Agenda | [`frontend/`](frontend/README.md) |
+| Backend | API FastAPI que liga o frontend aos agentes, ao perfil e ao Google Agenda | `backend/` ([`docs/api.md`](docs/api.md)) |
+| Agentes e IA | Agentes da agenda (JSON, sem LLM), Supervisor e Planejador (LLM no Ollama), RAG e estimativa de story points | `destrava/`, `modelos/` |
 
 | Agente | Situação |
 |---|---|
 | Visualização | Pronto: recebe um período em JSON e devolve os horários livres (somente leitura) |
 | Criar | Pronto: recebe título, início e fim em JSON e cria o evento |
-| Editar, excluir | Em desenvolvimento |
+| Editar | Pronto: recebe o ID do evento e os campos que mudam, em JSON (sem LLM) |
+| Excluir | Pronto: recebe o ID do evento em JSON e exclui (a confirmação vem antes, no chat ou no painel) |
+| Supervisor | Pronto para consultar horários, criar eventos e agendar o plano de um projeto (LLM, leitura de prazo, Pomodoro e confirmação). Editar e excluir ainda não passam pelo chat: o chat oferece o painel Agenda ([`docs/supervisor.md`](docs/supervisor.md)) |
+| Planejador | Pronto: transforma a descrição de um projeto em etapas com story points, usando o RAG ([`docs/planejador.md`](docs/planejador.md)) |
 | RAG (Supervisor e Planejador) | Máquina pronta, com LangChain (chunking, embeddings, banco vetorial Chroma, busca, prompt e geração). A base do Planejador tem conteúdo; a do Supervisor aguarda (ver [`docs/rag.md`](docs/rag.md)) |
 
 O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](docs/contrato.md).
@@ -53,9 +64,11 @@ O formato de entrada e de saída de cada agente está em [`docs/contrato.md`](do
 
 Todos os comandos são executados **na raiz do projeto**, com o ambiente virtual ativo.
 
+**Na primeira execução com o Google**, o navegador abre para você autorizar o acesso à agenda (leitura para o visualizar; escrita para criar, editar e excluir). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
+
 ### API FastAPI
 
-Para iniciar o backend com a rota de template:
+Para iniciar o backend (todas as rotas estão em [`docs/api.md`](docs/api.md)):
 
 ```
 uvicorn backend.main:app
@@ -76,7 +89,7 @@ npm install
 npm run dev
 ```
 
-O chat chama `POST /projetos` quando o usuário descreve um projeto com prazo.
+O chat conversa com o Supervisor (`POST /chat/stream`) e chama `POST /projetos` quando o usuário descreve um projeto.
 
 O frontend sempre usa o backend (não há mocks; o endereço fica em `frontend/.env.example`):
 
@@ -164,9 +177,7 @@ curl -X POST http://127.0.0.1:8000/historico `
   -d '{"story_points": 1, "tempo_real_minutos": 5}'
 ```
 
-**Na primeira execução com o Google**, o navegador abre para você autorizar o acesso à agenda (leitura para o visualizar, escrita para o criar). Se aparecer o aviso "app não verificado", clique em **Avançado** e continue (o app está em modo de teste). Depois disso, os arquivos `token_readonly.json` e `token_calendar.json` são criados e o login não é pedido de novo.
-
-### 1. CLI: os dois agentes (Google real)
+### 1. CLI: visualizar, criar e planejador
 
 ```
 python cli.py
@@ -186,7 +197,7 @@ Criar (**cria o evento de verdade** na agenda; datas sem fuso valem no horário 
 {"titulo": "Dentista", "inicio": "2026-11-15T15:00", "fim": "2026-11-15T16:00"}
 ```
 
-Os dois agentes devolvem o mesmo formato (`status`, `acao`, `periodo`, `dados`, `fluxo`, `erro`). Pedido inválido ou falha no Google não levanta exceção: volta como `"status": "erro"` e não altera a agenda.
+Os agentes da agenda (visualizar, criar, editar, excluir) devolvem o mesmo formato (`status`, `acao`, `periodo`, `dados`, `fluxo`, `erro`). A CLI só expõe visualizar, criar e o planejador; editar e excluir são usados pelo painel Agenda e pelo Supervisor, via API (`PUT` e `DELETE /calendar/events/{id}`). Pedido inválido ou falha no Google não levanta exceção: volta como `"status": "erro"` e não altera a agenda.
 
 ### 2. Scripts de teste manual
 
@@ -396,20 +407,25 @@ O índice do RAG (Chroma) é gerado na primeira execução com os embeddings do 
 
 ```
 backend/
-├── main.py                    API FastAPI (POST /projetos)
+├── main.py                    API FastAPI: /projetos, /prazos/interpretar, /historico, /tarefas, /calibracao
+├── chat.py                    /chat/stream (Supervisor, NDJSON) e /projetos/agendar (prévia e confirmação)
+├── calendario.py              login Google e CRUD de eventos (/auth/*, /calendar/events)
+├── perfil.py                  perfil da conta: sono e calibração dos story points (/perfil)
+├── history_models.py          modelos do histórico de tarefas concluídas
 ├── story_points.py            estimativa de story points: local (torch) ou cliente HTTP do servidor de IA
 └── servidor_story_points.py   serviço de story points do servidor de IA (POST /story-points)
 docker/                        Dockerfile do serviço de story points
 docker-compose.servidor-ia.yml servidor de IA com Docker (Ollama + story points na GPU)
 frontend/      interface web Next.js (landing, chat, agenda)
+modelos/       rede neural de story points (rede_neural.pt)
 destrava/
-├── core/      configurações e conexões compartilhadas (config, google_client, agenda_engine, models)
-├── agents/    um arquivo por agente (visualizar, criar, editar, excluir)
+├── core/      configurações e conexões compartilhadas (config, google_client, llm_client, agenda_engine, models, prazo, horario, pomodoro, encaixe_pomodoro)
+├── agents/    um arquivo por agente (visualizar, criar, editar, excluir, planejador, supervisor)
 ├── rag/       RAG (LangChain): chunker, banco vetorial, índice, recuperador; as bases de conhecimento ficam em rag/conhecimento/
-└── prompts/   prompts dos agentes ainda em desenvolvimento (editar, excluir)
-docs/          documentação técnica de cada agente e contrato JSON
-scripts/       scripts de teste manual
-tests/         testes automáticos (Google simulado)
+└── prompts/   prompts do Supervisor, do Planejador e do RAG
+docs/          documentação técnica (agentes, contrato JSON, API, RAG)
+scripts/       scripts de teste manual e de avaliação
+tests/         testes automáticos (Google e Ollama simulados)
 cli.py         linha de comando: cole um JSON (visualizar, criar) ou descreva um projeto (planejador)
 ```
 
@@ -425,4 +441,14 @@ python -c "from destrava.core import config; print(config.FUSO)"
 
 ## Documentação
 
-A documentação técnica de cada agente fica na pasta `docs/`. O contrato JSON dos agentes está em `docs/contrato.md` e o RAG em `docs/rag.md`.
+A documentação técnica fica na pasta `docs/`:
+
+| Documento | Assunto |
+|---|---|
+| [`docs/contrato.md`](docs/contrato.md) | Contrato JSON dos agentes da agenda |
+| [`docs/visualizar.md`](docs/visualizar.md), [`criar.md`](docs/criar.md), [`editar.md`](docs/editar.md), [`excluir.md`](docs/excluir.md) | Cada agente da agenda |
+| [`docs/supervisor.md`](docs/supervisor.md) | Supervisor: interpretação, prazo, encaixe Pomodoro e confirmação |
+| [`docs/planejador.md`](docs/planejador.md) | Planejador e estimativa de story points |
+| [`docs/api.md`](docs/api.md) | Rotas do backend e eventos do chat |
+| [`docs/rag.md`](docs/rag.md) | RAG |
+| [`frontend/README.md`](frontend/README.md) | Frontend |

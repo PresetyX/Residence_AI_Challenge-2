@@ -1,54 +1,64 @@
 # Agente Editar
 
 > Documentação técnica do **estado atual** do agente. A história (decisões, problemas, testes) fica no Google Docs.
-> Itens em *itálico* são orientações do que escrever. Troque pelo conteúdo real e apague a orientação.
 
 ## Objetivo
 
-Altera um evento existente da agenda a partir de um pedido em linguagem natural.
-*Escreva em 2 ou 3 linhas o que o agente faz e o que não faz.*
+Altera um evento existente do Google Agenda. Recebe o **ID** do evento e só os campos que mudam, em JSON, confere o evento no Google, aplica a alteração e devolve o evento atualizado em JSON. **Não usa LLM** e não interpreta texto livre: quem sabe qual é o evento (o painel Agenda do frontend) já manda o ID.
+
+Por enquanto o Supervisor não chama este agente: pedidos de edição no chat voltam como `indisponivel` e o chat oferece o painel manual.
 
 ## Contrato
 
-O que entra e o que sai, para o supervisor saber como chamá-lo.
+Classe `AgenteEditar` em `destrava/agents/editar.py`, mesmo formato de resposta dos outros agentes ([`contrato.md`](contrato.md)).
 
-| | |
-|---|---|
-| **Entrada** | texto: o pedido do usuário (ex.: "mude a reunião de sexta para as 16h") |
-| **Saída** | texto em português confirmando o resultado |
-| **Função de entrada** | `editar_evento_agenda(pedido: str) -> str` *(nome sugerido; confirmar com o grupo)* |
-
-## Fluxo
-
-Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
-
-| # | Passo | Quem |
+| Método | Entrada | Saída |
 |---|---|---|
-| 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
-| 2 | Localiza o evento e aplica a alteração no Google Agenda | Código |
-| 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
+| `executar_json(entrada)` | dict ou string JSON (`PedidoEdicao`) | dicionário `RespostaAgente` |
 
-*Ajuste os passos se o seu agente tiver mais etapas.*
+### Entrada
 
-## Regras
+```json
+{ "id": "abc123", "titulo": "Reunião com o time", "inicio": "2026-11-20T15:00", "fim": "2026-11-20T16:00" }
+```
 
-*Defina as regras do agente.* Exemplos de decisões: como identificar o evento certo (título, data); o que fazer se houver mais de um candidato; quais campos podem ser alterados.
+| Campo | Regra |
+|---|---|
+| `id` | Obrigatório (texto não vazio) |
+| `titulo` | Opcional; se vier, não pode ficar vazio |
+| `inicio`, `fim` | Opcionais, mas **vêm juntos** e `inicio` deve ser anterior a `fim`. Sem fuso, valem no horário de `config.FUSO` |
+| `descricao`, `local` | Opcionais |
 
-Os valores compartilhados (fuso, horários) estão em `destrava/core/config.py`.
+Campos ausentes ficam como estão no Google (o agente envia só o que mudou).
+
+### Saída (sucesso)
+
+`acao` = `evento_editado` e `dados.evento` com o evento atualizado (resumo do Google, pelo `evento_resumido`). `periodo` traz o início e o fim do evento. Etapas do `fluxo`: `validacao` / `google_calendar` / `conferencia`.
+
+### Saída (erro)
+
+`status` = `erro` e `acao` = `evento_nao_editado`, com `erro` = `{"tipo", "mensagem"}`. Pedido inválido não chama o Google; falha ou evento inexistente no Google marca `fluxo.meio` como erro.
+
+## Quem chama
+
+`PUT /calendar/events/{id}` (`backend/calendario.py`), usado pelo painel Agenda do frontend. Ver [`api.md`](api.md).
 
 ## Dependências do core
 
-- `google_client`: `get_service` com o escopo de **escrita** (`calendar`).
-- `llm_client`: `perguntar(prompt)`.
-- `config`: *liste só o que este agente usa.*
-- `prompts/editar.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
+- `google_client`: `get_service` com o escopo de **escrita** (`calendar`), `obter_evento` e `atualizar_evento`.
+- `config`: `FUSO` e `ESCOPO_CALENDARIO`.
+- `models`: `RespostaAgente`, `Fluxo`, `Etapa`, `Periodo`, `ErroInfo`.
 
 ## Como testar
 
-*Preencha quando o agente estiver rodando: o que precisa estar ativo e 3 a 5 pedidos de exemplo com o resultado esperado.*
+```
+python -m pytest tests/test_calendario_api.py
+```
+
+Os testes simulam o Google, então não precisam de `credentials.json`.
 
 ## Limitações
 
-- Não guarda memória entre perguntas.
-- Altera a agenda: exige o escopo de escrita.
-- *Acrescente as limitações reais que aparecerem.*
+- Não guarda memória entre pedidos.
+- Altera a agenda de verdade: exige o escopo de escrita (`token_calendar.json`).
+- Não interpreta linguagem natural: precisa do ID do evento.

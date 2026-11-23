@@ -1,54 +1,59 @@
 # Agente Excluir
 
 > Documentação técnica do **estado atual** do agente. A história (decisões, problemas, testes) fica no Google Docs.
-> Itens em *itálico* são orientações do que escrever. Troque pelo conteúdo real e apague a orientação.
 
 ## Objetivo
 
-Exclui um evento existente da agenda a partir de um pedido em linguagem natural.
-*Escreva em 2 ou 3 linhas o que o agente faz e o que não faz.*
+Exclui um evento do Google Agenda a partir do **ID**. Confere que o evento existe e não está cancelado, exclui e devolve o resultado em JSON. **Não usa LLM** e não interpreta texto livre. Como a exclusão não tem volta, a **confirmação do usuário acontece antes** da chamada (no painel Agenda, que mostra o modal de exclusão).
+
+Por enquanto o Supervisor não chama este agente: pedidos de exclusão no chat voltam como `indisponivel` e o chat oferece o painel manual.
 
 ## Contrato
 
-O que entra e o que sai, para o supervisor saber como chamá-lo.
+Arquivo `destrava/agents/excluir.py`.
 
-| | |
-|---|---|
-| **Entrada** | texto: o pedido do usuário (ex.: "cancele o dentista de amanhã") |
-| **Saída** | texto em português confirmando o resultado |
-| **Função de entrada** | `excluir_evento_agenda(pedido: str) -> str` *(nome sugerido; confirmar com o grupo)* |
-
-## Fluxo
-
-Quem faz cada passo: o LLM só interpreta e redige, o código fala com a API.
-
-| # | Passo | Quem |
+| Função ou método | Entrada | Saída |
 |---|---|---|
-| 1 | Extrai do pedido os dados em JSON (`PROMPT_EXTRACAO`) | LLM |
-| 2 | Localiza o evento e o exclui no Google Agenda | Código |
-| 3 | Escreve a resposta final usando só os dados retornados (`PROMPT_RESPOSTA`) | LLM |
+| `AgenteExcluir().executar_json(entrada)` | `{"id": "..."}` | dicionário `RespostaAgente` ([`contrato.md`](contrato.md)) |
+| `excluir_evento_agenda(id_evento)` | ID do evento | `{"sucesso", "codigo", "id_evento", "mensagem"}` |
 
-*Ajuste os passos se o seu agente tiver mais etapas.*
+Códigos de `excluir_evento_agenda`:
 
-## Regras
+| `codigo` | Quando |
+|---|---|
+| `excluido` | Evento excluído |
+| `id_invalido` | ID vazio ou que não é texto (o Google não é chamado) |
+| `nao_encontrado` | O evento não existe, ou já está cancelado ou excluído |
+| `sem_permissao` | O Google recusou a consulta ou a exclusão |
+| `erro_google_calendar` | Outro erro HTTP da API |
+| `erro_inesperado` | Falha fora da API (rede, por exemplo) |
 
-*Defina as regras do agente.* Exemplos de decisões: como identificar o evento certo; se pede confirmação antes de excluir; o que fazer se houver mais de um candidato (por ser uma ação irreversível, é recomendável não excluir sem certeza).
+### Saída em JSON
 
-Os valores compartilhados (fuso, horários) estão em `destrava/core/config.py`.
+- Sucesso: `acao` = `evento_excluido` e `dados` = `{"evento_id", "titulo"}`.
+- Erro: `status` = `erro`, `acao` = `evento_nao_excluido` e `erro` = `{"tipo": <codigo>, "mensagem"}`.
+
+Etapas do `fluxo`: `validacao` / `google_calendar` / `conferencia`.
+
+## Quem chama
+
+`DELETE /calendar/events/{id}` (`backend/calendario.py`), usado pelo painel Agenda. Ver [`api.md`](api.md).
 
 ## Dependências do core
 
-- `google_client`: `get_service` com o escopo de **escrita** (`calendar`).
-- `llm_client`: `perguntar(prompt)`.
-- `config`: *liste só o que este agente usa.*
-- `prompts/excluir.py`: `PROMPT_EXTRACAO` e `PROMPT_RESPOSTA`.
+- `google_client`: `get_service` com o escopo de **escrita** (`calendar`), `obter_evento` e `excluir_evento`.
+- `config`: `ESCOPO_CALENDARIO`.
 
 ## Como testar
 
-*Preencha quando o agente estiver rodando: o que precisa estar ativo e 3 a 5 pedidos de exemplo com o resultado esperado.*
+```
+python -m pytest tests/test_calendario_api.py
+```
+
+Os testes simulam o Google, então não precisam de `credentials.json`.
 
 ## Limitações
 
-- Não guarda memória entre perguntas.
-- Altera a agenda: exige o escopo de escrita.
-- *Acrescente as limitações reais que aparecerem.*
+- Não guarda memória entre pedidos.
+- Exclui de verdade: exige o escopo de escrita e a confirmação do usuário antes da chamada.
+- Não interpreta linguagem natural: precisa do ID do evento.

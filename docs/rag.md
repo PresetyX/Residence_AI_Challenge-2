@@ -4,7 +4,7 @@
 
 ## Objetivo
 
-Dar a cada agente (Supervisor, Planejador) o contexto certo para cada pedido: o RAG busca numa base de conhecimento e devolve só os trechos relevantes, para o prompt ficar curto (o modelo é pequeno, `gemma2:2b`).
+Dar a cada agente (Supervisor, Planejador) o contexto certo para cada pedido: o RAG busca numa base de conhecimento e devolve só os trechos relevantes, para o prompt ficar curto (o modelo é pequeno; o padrão está em `MODELO`, no `config.py`).
 
 O RAG é **a máquina**: chunking, embeddings, banco vetorial, busca, construção do prompt e geração. Ele **não tem conteúdo**: o que vai dentro de cada base é responsabilidade de quem cuida dela (ver "Como preencher uma base"). Base vazia é válida: a busca não devolve nada e nada quebra.
 
