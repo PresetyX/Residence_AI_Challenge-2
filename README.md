@@ -174,7 +174,7 @@ média histórica de `data/historico.json` (base para o futuro banco):
 ```
 curl -X POST http://127.0.0.1:8000/historico `
   -H "Content-Type: application/json" `
-  -d '{"story_points": 1, "tempo_real_minutos": 5}'
+  -d '{"id_evento": "id-do-evento", "tempo_real_minutos": 5}'
 ```
 
 ### 1. CLI: visualizar, criar e planejador

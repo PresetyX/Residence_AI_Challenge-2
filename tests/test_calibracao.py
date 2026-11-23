@@ -1,7 +1,9 @@
 from types import SimpleNamespace
+import sqlite3
 import pytest
 from fastapi import HTTPException
 
+from backend.database import CAMINHO_BANCO_EVENTOS, TABELA_EVENTOS, inicializar_banco_eventos
 from backend.main import (
     HistoricoTarefaRequest,
     ProjetoRequest,
@@ -11,6 +13,24 @@ from backend.main import (
     registrar_respostas_calibracao,
     story_points_perguntas,
 )
+
+
+def registrar_storypoints_evento(id_evento: str, storypoints: int) -> None:
+    inicializar_banco_eventos()
+    with sqlite3.connect(CAMINHO_BANCO_EVENTOS) as conexao:
+        conexao.execute(
+            f"INSERT OR REPLACE INTO {TABELA_EVENTOS} (id, storypoints) VALUES (?, ?)",
+            (id_evento, storypoints),
+        )
+
+
+def remover_storypoints_evento(id_evento: str) -> None:
+    inicializar_banco_eventos()
+    with sqlite3.connect(CAMINHO_BANCO_EVENTOS) as conexao:
+        conexao.execute(
+            f"DELETE FROM {TABELA_EVENTOS} WHERE id = ?",
+            (id_evento,),
+        )
 
 
 def test_listar_perguntas_calibracao_devolve_lista_no_contrato():
@@ -30,9 +50,10 @@ def test_registrar_respostas_calibracao_devolve_apenas_status():
 
 def test_historico_de_tarefa_devolve_apenas_status():
     registrar_respostas_calibracao([15 * pontos for pontos in story_points_perguntas])
+    registrar_storypoints_evento("evento-teste", 1)
 
     resposta = registrar_historico(
-        HistoricoTarefaRequest(story_points=1, tempo_real_minutos=5)
+        HistoricoTarefaRequest(id_evento="evento-teste", tempo_real_minutos=5)
     )
 
     assert resposta == {"status": "sucesso"}
@@ -40,7 +61,8 @@ def test_historico_de_tarefa_devolve_apenas_status():
 
 def test_calibracao_reinicia_media_e_contagem_de_tarefas():
     registrar_respostas_calibracao([15 * pontos for pontos in story_points_perguntas])
-    registrar_historico(HistoricoTarefaRequest(story_points=1, tempo_real_minutos=5))
+    registrar_storypoints_evento("evento-teste", 1)
+    registrar_historico(HistoricoTarefaRequest(id_evento="evento-teste", tempo_real_minutos=5))
 
     resposta = registrar_respostas_calibracao(
         [20 * pontos for pontos in story_points_perguntas]
@@ -111,9 +133,10 @@ def test_calibracao_exige_tres_respostas():
 
 
 def test_registrar_historico_rejeita_zero_story_points():
+    registrar_storypoints_evento("evento-zero", 0)
     with pytest.raises(HTTPException, match="maiores que zero"):
         registrar_historico(
-            HistoricoTarefaRequest(story_points=0, tempo_real_minutos=5)
+            HistoricoTarefaRequest(id_evento="evento-zero", tempo_real_minutos=5)
         )
 
 

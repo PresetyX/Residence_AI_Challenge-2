@@ -20,6 +20,7 @@ from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
+from backend.database import buscar_storypoints_evento, inicializar_banco_eventos
 
 
 RAIZ_PROJETO = Path(__file__).resolve().parents[1]
@@ -68,6 +69,7 @@ def _carregar_historico() -> None:
 
 async def lifespan(app: FastAPI):
     _carregar_historico()
+    inicializar_banco_eventos()
     # Sono e calibração da última conta que entrou (data/perfis.json).
     perfil.ativar_conta_salva()
     # Com STORY_POINTS_URL definido, o estimador é só um cliente HTTP do
@@ -172,10 +174,18 @@ def interpretar_prazo_do_texto(corpo: InterpretarPrazoRequest) -> dict[str, str 
 class HistoricoTarefaRequest(BaseModel):
     model_config = ConfigDict(strict=True)
 
-    story_points: int
+    id_evento: str
     tempo_real_minutos: int
 
-    @field_validator("story_points", "tempo_real_minutos")
+    @field_validator("id_evento")
+    @classmethod
+    def validar_id_evento(cls, id_evento: str) -> str:
+        id_evento = id_evento.strip()
+        if not id_evento:
+            raise ValueError("O id do evento não pode ser vazio.")
+        return id_evento
+
+    @field_validator("tempo_real_minutos")
     @classmethod
     def validar_valor_nao_negativo(cls, valor: int) -> int:
         if valor < 0:
@@ -265,11 +275,20 @@ def criar_projeto(
     return resposta
 
 
+@app.post("/projetos/agendar")
+
+
 @app.post("/historico", response_model=StatusResponse, status_code=201)
 def registrar_historico(
     historico: HistoricoTarefaRequest,
 ) -> dict[str, str]:
-    if historico.story_points <= 0:
+    story_points = buscar_storypoints_evento(historico.id_evento)
+    if story_points is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Não existe um registro de story points para este evento.",
+        )
+    if story_points <= 0:
         raise HTTPException(
             status_code=422,
             detail="Os story points devem ser maiores que zero para compor a média.",
@@ -277,7 +296,7 @@ def registrar_historico(
 
     global media_minutos_por_story_point, _quantidade_observacoes_media
     with _LOCK_HISTORICO:
-        fator_tarefa = historico.tempo_real_minutos / historico.story_points
+        fator_tarefa = historico.tempo_real_minutos / story_points
         total_observacoes = _quantidade_observacoes_media + 1
         media_minutos_por_story_point = (
             media_minutos_por_story_point * _quantidade_observacoes_media

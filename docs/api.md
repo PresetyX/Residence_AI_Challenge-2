@@ -43,7 +43,7 @@ Linhas do NDJSON de `/chat/stream`:
 | `POST /projetos` | `{texto, prazo?}`: Planejador + story points ([`planejador.md`](planejador.md)). Erros: `422` (entrada ou prazo inválido, ou prazo que já passou), `502` (resposta da IA fora do contrato), `503` (Ollama ou serviço de story points fora do ar) |
 | `POST /prazos/interpretar` | Lê um prazo escrito em texto ("até amanhã", "20/12") |
 | `GET /tarefas` | Compromissos da agenda em uma janela (`inicio`, `fim`) |
-| `POST /historico` | Registra o tempo real de uma tarefa concluída (`story_points`, `tempo_real_minutos`) na média histórica (`data/historico.json`) |
+| `POST /historico` | Registra o tempo real de uma tarefa concluída (`id_evento`, `tempo_real_minutos`) na média histórica (`data/historico.json`). Os story points são buscados em `data/eventos.db`, tabela `eventos` |
 | `GET /calibracao`, `POST /calibracao` | As 10 tarefas da calibração e o envio dos tempos (ver README) |
 
 ## Perfil (`backend/perfil.py`)
