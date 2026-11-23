@@ -9,7 +9,6 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.agents.criar import AgenteCriar
-from destrava.agents.planejador import PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
@@ -195,25 +194,17 @@ class AgenteSupervisor:
         """Prazo de entrega escrito no pedido ("até amanhã", "tenho uma semana", "20/12")."""
         return interpretar_prazo(texto, datetime.now(config.FUSO))
 
-    def receber_planejamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
+    def receber_planejamento(self, prazo: str, tarefas: list | None = None) -> dict:
         """Recebe e valida as subtarefas devolvidas pelo Planejador.
 
-        Com ``tarefas`` (um plano já gerado, ex.: o do POST /projetos), valida
-        essas tarefas em vez de chamar o Planejador de novo.
+        Valida as tarefas já geradas pelo POST /projetos.
         """
 
-        if self.planejador is None and tarefas is None:
+        if tarefas is None:
             return {
                 "status": "erro",
                 "acao": "planejar",
-                "mensagem": "Nenhum Planejador foi conectado."
-            }
-
-        if not isinstance(projeto, str) or not projeto.strip():
-            return {
-                "status": "erro",
-                "acao": "planejar",
-                "mensagem": "Informe um projeto válido."
+                "mensagem": "Informe a lista de tarefas."
             }
 
         try:
@@ -230,11 +221,7 @@ class AgenteSupervisor:
             }
 
         try:
-            resposta = (
-                {"tarefas": tarefas}
-                if tarefas is not None
-                else self.planejador.executar(projeto.strip(), prazo)
-            )
+            resposta = {"tarefas": tarefas}
 
             plano = RespostaPlanejador.model_validate(resposta)
 
@@ -245,14 +232,6 @@ class AgenteSupervisor:
 
             if any(not tarefa.titulo.strip() for tarefa in tarefas):
                 raise ValueError("Existe uma tarefa com título vazio.")
-
-        except PedidoNaoEntendido as erro:
-            # O Planejador não entendeu o projeto: pede mais detalhes ao usuário.
-            return {
-                "status": "esclarecimento",
-                "acao": "planejar",
-                "mensagem": str(erro)
-            }
 
         except (ValidationError, ValueError, TypeError) as erro:
             return {
@@ -273,18 +252,17 @@ class AgenteSupervisor:
             "acao": "planejar",
             "mensagem": f"Recebi {len(tarefas)} tarefas do Planejador.",
             "dados": {
-                "projeto": projeto.strip(),
                 "prazo": prazo,
                 "tarefas": [tarefa.model_dump(exclude_none=True) for tarefa in tarefas]
             }
         }
 
         
-    def consultar_periodos_projeto(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
+    def consultar_periodos_projeto(self, prazo: str, tarefas: list | None = None) -> dict:
         """Recebe as tarefas e consulta os horários livres até o prazo."""
 
         # 1. Recebe e valida as tarefas do Planejador.
-        planejamento = self.receber_planejamento(projeto, prazo, tarefas)
+        planejamento = self.receber_planejamento(prazo, tarefas)
 
         if planejamento["status"] != "sucesso":
             return planejamento
@@ -351,14 +329,13 @@ class AgenteSupervisor:
             "mensagem": "Tarefas e horários livres recebidos com sucesso.",
             "periodo": resposta.get("periodo"),
             "dados": {
-                "projeto": projeto.strip(),
                 "prazo": prazo,
                 "tarefas": planejamento["dados"]["tarefas"],
                 "livres": dados["livres"],
                 "total_minutos_livres": dados["total_minutos_livres"]
             }
         }
-    def preparar_agendamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
+    def preparar_agendamento(self, prazo: str, tarefas: list | None = None) -> dict:
         """Classifica o prazo e prepara a previa, sem criar eventos."""
         self.cronograma_pendente = None
         if self.evento_pendente is not None:
@@ -367,7 +344,7 @@ class AgenteSupervisor:
                 "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
             }
 
-        consulta = self.consultar_periodos_projeto(projeto, prazo, tarefas)
+        consulta = self.consultar_periodos_projeto(prazo, tarefas)
         if consulta.get("status") != "sucesso":
             return consulta
 
@@ -405,7 +382,6 @@ class AgenteSupervisor:
                                      "ate a data limite, nem sem Pomodoro. " + motivo +
                                      " Nenhum evento foi criado."),
                         "dados": {
-                            "projeto": projeto, "prazo": prazo,
                             "classificacao": "impossivel",
                             "minutos_faltantes_minimos": deficit,
                             "eventos": [],
@@ -429,7 +405,6 @@ class AgenteSupervisor:
             "classificacao": classificacao,
             "mensagem": mensagem,
             "dados": {
-                "projeto": projeto, "prazo": prazo,
                 "classificacao": classificacao,
                 "eventos": eventos,
                 "pomodoros": detalhes,

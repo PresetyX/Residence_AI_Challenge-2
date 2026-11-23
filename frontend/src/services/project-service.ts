@@ -129,14 +129,12 @@ export interface ScheduleResultDto {
 }
 
 export const scheduleService = {
-  preview(plan: ProjectPlan, goal: string, signal?: AbortSignal): Promise<SchedulePreviewDto> {
+  preview(plan: ProjectPlan, signal?: AbortSignal): Promise<SchedulePreviewDto> {
     return request<SchedulePreviewDto>("/projetos/agendar", {
       method: "POST",
       body: JSON.stringify({
-        projeto: plan.description,
         prazo: plan.deadline,
         tarefas: plan.tasks.map(toTaskDto),
-        meta: goal,
       }),
       signal,
     });

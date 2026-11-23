@@ -22,7 +22,7 @@ O frontend só fala com esta API. Erros de validação voltam como `422`; as rot
 |---|---|
 | `POST /chat/stream` | Chat com o [Supervisor](supervisor.md). Entrada: `{"modelo", "sistema", "mensagens": [{"papel", "conteudo"}]}`. Saída: NDJSON |
 | `POST /chat/reiniciar` | Zera as confirmações pendentes (nova conversa) |
-| `POST /projetos/agendar` | `{projeto, prazo, tarefas, meta?}`: classifica o prazo e devolve a prévia, sem criar nada |
+| `POST /projetos/agendar` | `{prazo, tarefas}`: classifica o prazo e devolve a prévia, sem criar nada |
 | `POST /projetos/agendar/confirmar` | `{confirmado}`: cria os eventos da prévia (ou cancela) |
 
 Linhas do NDJSON de `/chat/stream`:

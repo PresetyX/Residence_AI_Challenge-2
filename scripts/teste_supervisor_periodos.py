@@ -19,7 +19,7 @@ def main():
 
     supervisor = AgenteSupervisor(planejador=planejador)
     prazo = (datetime.now(config.FUSO).date() + timedelta(days=7)).isoformat()
-    resposta = supervisor.consultar_periodos_projeto("Desenvolver um site", prazo)
+    resposta = supervisor.consultar_periodos_projeto(prazo, planejador.executar.return_value["tarefas"])
 
     print(json.dumps(resposta, indent=2, ensure_ascii=False))
 

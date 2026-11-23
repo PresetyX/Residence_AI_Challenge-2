@@ -8,13 +8,14 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 from backend.calendario import router as calendario_router
 from backend.chat import router as chat_router
 from backend import perfil
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
+from destrava.agents.supervisor import AgenteSupervisor
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
@@ -80,6 +81,11 @@ async def lifespan(app: FastAPI):
     print(f"Story points: modo {modo}. LLM: {config.MODELO} em {config.OLLAMA_URL}.")
     app.state.planejador = AgentePlanejador(rag=obter_rag("planejador"))
     app.state.visualizador = AgenteVisualizar()
+    app.state.supervisor = AgenteSupervisor(
+        visualizador=app.state.visualizador,
+        criador=None,
+        planejador=app.state.planejador,
+    )
     yield
 
 
@@ -214,6 +220,21 @@ class PerguntasCalibracaoResponse(BaseModel):
     perguntas: list[dict[str, str]]
 
 
+class AgendarProjetoRequest(BaseModel):
+    prazo: str
+    tarefas: list[dict] = Field(min_length=1)
+
+
+@app.post("/projetos/agendar")
+def agendar_projeto(
+    corpo: AgendarProjetoRequest,
+    request: Request,
+) -> dict:
+    supervisor: AgenteSupervisor = request.app.state.supervisor
+    supervisor.evento_pendente = None
+    return supervisor.preparar_agendamento(corpo.prazo, corpo.tarefas)
+
+
 @app.post("/projetos")
 def criar_projeto(
     projeto: ProjetoRequest,
@@ -273,9 +294,6 @@ def criar_projeto(
     if prazo is None:
         resposta["precisa_prazo"] = True
     return resposta
-
-
-@app.post("/projetos/agendar")
 
 
 @app.post("/historico", response_model=StatusResponse, status_code=201)

@@ -21,7 +21,7 @@ def main():
 
     supervisor = AgenteSupervisor(planejador=planejador)
     prazo = (datetime.now(config.FUSO).date() + timedelta(days=7)).isoformat()
-    resposta = supervisor.preparar_agendamento("Desenvolver um site", prazo)
+    resposta = supervisor.preparar_agendamento(prazo, planejador.executar.return_value["tarefas"])
 
     print("\n", resposta["mensagem"], "\n")
     if resposta["status"] != "confirmacao":

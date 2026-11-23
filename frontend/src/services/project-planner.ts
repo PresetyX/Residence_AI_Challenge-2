@@ -222,7 +222,7 @@ async function* previewSchedule(
   signal?: AbortSignal,
 ): AsyncGenerator<InferenceChunk> {
   yield { type: "status", value: "Classificando o prazo e procurando horários livres na sua agenda…" };
-  const preview = await scheduleService.preview(plan, goal, signal);
+  const preview = await scheduleService.preview(plan, signal);
   const slots = preview.dados?.eventos ?? [];
   const kind = preview.classificacao ?? preview.dados?.classificacao;
   const heading = kind ? `**${CLASS_LABEL[kind]}.** ` : "";
