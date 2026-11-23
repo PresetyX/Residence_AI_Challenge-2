@@ -72,7 +72,9 @@ def converter_evento_google(evento: dict) -> dict | None:
 class AgenteVisualizar:
     """Agente de visualização: ocupados, livres e conflitos de um período."""
 
-    def executar_json(self, entrada: dict | str) -> dict:
+    def executar_json(
+        self, entrada: dict | str, incluir_ocupados: bool = False
+    ) -> dict:
         """Recebe o período em JSON e devolve os horários livres em JSON.
 
         Args:
@@ -85,6 +87,8 @@ class AgenteVisualizar:
               total_minutos_livres), com as três etapas do fluxo "ok".
             - Erro: status "erro" e erro {tipo, mensagem}. A etapa que falhou
               fica "erro" no fluxo e as seguintes ficam "pendente".
+            incluir_ocupados: inclui os blocos ocupados em ``dados`` quando
+                verdadeiro. O padrão preserva o contrato original.
         """
         # 0. Cria o fluxo com as 3 etapas ainda pendentes.
         fluxo = Fluxo(
@@ -127,14 +131,18 @@ class AgenteVisualizar:
         fluxo.fim.status = "ok"
 
         # 4. Sucesso. Por enquanto só livres; ocupados e conflitos ficam de fora.
+        dados = {
+            "livres": resultado["livres"],
+            "total_minutos_livres": resultado["total_minutos_livres"],
+        }
+        if incluir_ocupados:
+            dados["ocupados"] = resultado["ocupados"]
+
         return RespostaAgente(
             status="sucesso",
             acao="agenda_visualizada",
             periodo=periodo,
-            dados={
-                "livres": resultado["livres"],
-                "total_minutos_livres": resultado["total_minutos_livres"],
-            },
+            dados=dados,
             fluxo=fluxo,
         ).model_dump(mode="json")
 

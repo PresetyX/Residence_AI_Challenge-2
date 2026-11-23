@@ -5,9 +5,17 @@ token*.json
 # Variáveis de ambiente
 .env
 
+# Banco SQLite local
+data/
+*.sqlite3
+
 # Ambiente virtual
 .venv/
 
 # Cache do Python
 __pycache__/
 *.pyc
+
+# RAG: cópia local dos índices
+.rag_indices/
+consentimento.json
