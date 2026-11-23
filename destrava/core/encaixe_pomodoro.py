@@ -101,7 +101,8 @@ def encaixar_tarefas_pomodoro(
     reserva = config.MINIMO_LIVRE_DIA
     janelas = [janela for janela in janelas
                if tempo_livre_por_dia[janela[0].date()] > reserva]
-    fim_ultimo_evento_por_dia: dict = {}
+    # Impede que uma etapa posterior seja agendada antes da anterior, mesmo em outro dia.
+    ultimo_fim: datetime | None = None
     eventos, detalhes = [], []
 
     for tarefa in tarefas:
@@ -111,9 +112,8 @@ def encaixar_tarefas_pomodoro(
         for janela in janelas:
             dia = janela[0].date()
             inicio = max(janela[0], agora)
-            anterior = fim_ultimo_evento_por_dia.get(dia)
-            if anterior is not None:
-                inicio = max(inicio, anterior)
+            if ultimo_fim is not None:
+                inicio = max(inicio, ultimo_fim)
             inicio = _proximo_minuto(inicio)
 
             if usar_pomodoro:
@@ -141,7 +141,7 @@ def encaixar_tarefas_pomodoro(
                 })
                 if usar_pomodoro:
                     detalhes.append({"titulo": titulo, "sessoes": sessoes})
-                fim_ultimo_evento_por_dia[dia] = fim
+                ultimo_fim = fim
                 tempo_agendado_por_dia[dia] += duracao_total
                 janela[0] = fim
                 break
