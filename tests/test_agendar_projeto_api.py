@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 import backend.chat as chat
 import backend.main as main
+from backend.database import buscar_storypoints_evento
 from destrava.agents.supervisor import AgenteSupervisor
 from destrava.core import config
 
@@ -44,6 +45,7 @@ def _cliente(livres):
     supervisor.verificar_disponibilidade = lambda evento: True
     app.state.supervisor = supervisor
     app.post("/projetos/agendar")(main.agendar_projeto)
+    app.post("/projetos/agendar/confirmar")(main.confirmar_agendamento)
     return TestClient(app), criador
 
 
@@ -70,6 +72,7 @@ def test_prevê_classifica_e_cria():
     resultado = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()
     assert resultado["status"] == "sucesso"
     assert len(criador.criados) == 2
+    assert all(buscar_storypoints_evento(evento["id"]) == 0 for evento in criador.criados)
 
     # Outro "sim" não repete a criação.
     de_novo = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()

@@ -21,12 +21,17 @@ from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
-from backend.database import buscar_storypoints_evento, inicializar_banco_eventos
+from backend.database import (
+    buscar_storypoints_evento,
+    inicializar_banco_eventos,
+    salvar_eventos_sem_storypoints,
+)
 
 
 RAIZ_PROJETO = Path(__file__).resolve().parents[1]
 CAMINHO_HISTORICO = RAIZ_PROJETO / "data" / "historico.json"
 _LOCK_HISTORICO = Lock()
+_LOCK_AGENDAMENTO = Lock()
 _MEDIA_INICIAL = 30.0
 _QUANTIDADE_INICIAL = 5
 
@@ -225,14 +230,39 @@ class AgendarProjetoRequest(BaseModel):
     tarefas: list[dict] = Field(min_length=1)
 
 
+class ConfirmarAgendamentoRequest(BaseModel):
+    confirmado: bool
+
+
 @app.post("/projetos/agendar")
 def agendar_projeto(
     corpo: AgendarProjetoRequest,
     request: Request,
 ) -> dict:
     supervisor: AgenteSupervisor = request.app.state.supervisor
-    supervisor.evento_pendente = None
-    return supervisor.preparar_agendamento(corpo.prazo, corpo.tarefas)
+    with _LOCK_AGENDAMENTO:
+        supervisor.evento_pendente = None
+        return supervisor.preparar_agendamento(corpo.prazo, corpo.tarefas)
+
+
+@app.post("/projetos/agendar/confirmar")
+def confirmar_agendamento(
+    corpo: ConfirmarAgendamentoRequest,
+    request: Request,
+) -> dict:
+    supervisor: AgenteSupervisor = request.app.state.supervisor
+    with _LOCK_AGENDAMENTO:
+        resultado = supervisor.confirmar_agendamento(corpo.confirmado)
+
+        dados = resultado.get("dados")
+        eventos_criados = dados.get("eventos_criados", []) if isinstance(dados, dict) else []
+        ids_eventos = [
+            evento["id"]
+            for evento in eventos_criados
+            if isinstance(evento, dict) and isinstance(evento.get("id"), str)
+        ]
+        salvar_eventos_sem_storypoints(ids_eventos)
+        return resultado
 
 
 @app.post("/projetos")

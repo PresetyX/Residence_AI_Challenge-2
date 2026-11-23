@@ -169,11 +169,3 @@ def chat_stream(corpo: ChatRequest, request: Request) -> StreamingResponse:
 # ---------------------------------------------------------------------------
 
 
-class ConfirmarRequest(BaseModel):
-    confirmado: bool
-
-@router.post("/projetos/agendar/confirmar")
-def confirmar_agendamento(corpo: ConfirmarRequest, request: Request) -> dict:
-    supervisor = _supervisor(request)
-    with _lock:
-        return supervisor.confirmar_agendamento(corpo.confirmado)

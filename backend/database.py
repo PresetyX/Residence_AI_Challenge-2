@@ -34,3 +34,12 @@ def buscar_storypoints_evento(id_evento: str) -> int | None:
             (id_evento,),
         ).fetchone()
     return None if resultado is None else resultado[0]
+
+
+def salvar_eventos_sem_storypoints(ids_eventos: list[str]) -> None:
+    inicializar_banco_eventos()
+    with sqlite3.connect(CAMINHO_BANCO_EVENTOS) as conexao:
+        conexao.executemany(
+            f"INSERT OR REPLACE INTO {TABELA_EVENTOS} (id, storypoints) VALUES (?, 0)",
+            ((id_evento,) for id_evento in ids_eventos),
+        )
