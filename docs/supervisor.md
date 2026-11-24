@@ -54,7 +54,7 @@ Fluxo de `preparar_agendamento` e `confirmar_agendamento`:
 
 ## Dependências
 
-- `agents/visualizar.py`, `agents/criar.py`, `agents/planejador.py` (`PedidoNaoEntendido`).
+- `tools/visualizar.py`, `tools/criar.py`, `agents/planejador.py` (`PedidoNaoEntendido`).
 - `core/llm_client.py` (`perguntar`, `extrair_json`), `core/prazo.py`, `core/encaixe_pomodoro.py`, `core/pomodoro.py`, `core/config.py`.
 - Quem chama: `backend/chat.py` ([`api.md`](api.md)).
 
