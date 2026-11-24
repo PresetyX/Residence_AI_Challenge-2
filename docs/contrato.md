@@ -4,7 +4,7 @@ Os agentes **recebem JSON e devolvem JSON, sem usar LLM**. Quem interpreta o ped
 
 A função de entrada de cada agente é `executar_json(entrada)`.
 
-Os dois agentes devolvem o **mesmo JSON** (`RespostaAgente`, em `destrava/core/models.py`); só muda o conteúdo de `acao` e de `dados`.
+Os quatro agentes da agenda (visualizar, criar, editar e excluir) devolvem o **mesmo JSON** (`RespostaAgente`, em `destrava/core/models.py`); só muda o conteúdo de `acao` e de `dados`.
 
 ## Entrada
 
@@ -14,6 +14,8 @@ Os dois agentes devolvem o **mesmo JSON** (`RespostaAgente`, em `destrava/core/m
 |---|---|---|
 | visualizar | `PedidoVisualizacao` | `{"inicio": "...", "fim": "..."}` (se `fim` for igual a `inicio`, o período vira o dia inteiro) |
 | criar | `PedidoCriacao` | `{"titulo": "...", "inicio": "...", "fim": "..."}` |
+| editar | `PedidoEdicao` (`destrava/agents/editar.py`) | `{"id": "...", "titulo"?, "inicio"?, "fim"?, "descricao"?, "local"?}` (só os campos enviados mudam; `inicio` e `fim` vêm juntos) |
+| excluir | dict com o ID | `{"id": "..."}` |
 
 ## Saída
 
@@ -45,8 +47,10 @@ Os dois agentes devolvem o **mesmo JSON** (`RespostaAgente`, em `destrava/core/m
 |---|---|---|---|
 | visualizar | `agenda_visualizada` / `agenda_nao_visualizada` | `livres` e `total_minutos_livres` | `validacao` / `google_calendar` / `calculo` |
 | criar | `evento_criado` / `evento_nao_criado` | `evento` (`id`, `titulo`, `inicio`, `fim`, `link`) | `validacao` / `google_calendar` / `conferencia` |
+| editar | `evento_editado` / `evento_nao_editado` | `evento` (evento atualizado) | `validacao` / `google_calendar` / `conferencia` |
+| excluir | `evento_excluido` / `evento_nao_excluido` | `evento_id` e `titulo` | `validacao` / `google_calendar` / `conferencia` |
 
-Detalhes de cada agente: [visualizar.md](visualizar.md) e [criar.md](criar.md).
+Detalhes de cada agente: [visualizar.md](visualizar.md), [criar.md](criar.md), [editar.md](editar.md) e [excluir.md](excluir.md). O Supervisor e o Planejador têm formatos próprios: [supervisor.md](supervisor.md) e [planejador.md](planejador.md).
 
 ## Erros
 

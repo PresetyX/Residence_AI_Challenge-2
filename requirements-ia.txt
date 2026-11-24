@@ -1,0 +1,18 @@
+# Dependências pesadas da IA local: BGE-M3 + rede neural de story points.
+#
+# Instale só no servidor de IA (o PC com a GPU) ou se for rodar tudo na própria
+# máquina, sem STORY_POINTS_URL:
+#
+#     pip install -r requirements.txt -r requirements-ia.txt
+#
+# O notebook do time que usa o servidor de IA NÃO precisa deste arquivo.
+#
+# GPU NVIDIA: o torch padrão do PyPI no Windows vem só com CPU. Para a GPU
+# (a RTX 50xx exige CUDA 12.8 ou mais novo), instale o torch do índice do PyTorch
+# antes deste arquivo:
+#
+#     pip install torch --index-url https://download.pytorch.org/whl/cu128
+
+sentence-transformers>=3.0,<6.0
+torch>=2.6,<3.0
+scikit-learn>=1.5,<2.0             # treino da rede de story points (notebook)

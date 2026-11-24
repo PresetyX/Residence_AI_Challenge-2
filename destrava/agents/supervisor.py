@@ -9,11 +9,13 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.agents.criar import AgenteCriar
+from destrava.agents.planejador import PedidoNaoEntendido
 from destrava.agents.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
-from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo
+from destrava.core.prazo import interpretar_prazo
+from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo, periodo_acordado
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
 
@@ -27,6 +29,15 @@ class TarefaPlanejador(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     etapa: int = Field(ge=0)
     titulo: str = Field(min_length=1)
+    # Campos que o Planejador também devolve (POST /projetos). São opcionais:
+    # o encaixe na agenda usa só etapa e título.
+    objetivo: str | None = None
+    entregaveis: str | None = None
+    demonstracao: str | None = None
+    dependencia: int | None = None
+    story_points: int | None = None
+    # Devolvido pelo POST /projetos (story_points x 60); o encaixe recalcula.
+    tempo_estimado_minutos: int | float | None = None
 
 
 class RespostaPlanejador(BaseModel):
@@ -155,10 +166,13 @@ def _horario_acordado(inicio: datetime, fim: datetime) -> bool:
     """Proteção adicional ao cálculo de sono existente no agenda_engine.py."""
     inicio = inicio.astimezone(config.FUSO)
     fim = fim.astimezone(config.FUSO)
-    # Rotina do MVP: horários acordado e dormir no MESMO dia (06h às 22h).
-    return (inicio.date() == fim.date()
-            and config.HORARIO_ACORDAR <= inicio.time().replace(tzinfo=None)
-            and fim.time().replace(tzinfo=None) <= config.HORARIO_DORMIR)
+    # O evento cabe inteiro num período acordado (do perfil do usuário). Quem
+    # dorme depois da meia-noite ainda está no período do dia anterior.
+    for dia in (inicio.date() - timedelta(days=1), inicio.date()):
+        acordar, dormir = periodo_acordado(dia)
+        if acordar <= inicio and fim <= dormir:
+            return True
+    return False
 
 
 class AgenteSupervisor:
@@ -177,10 +191,18 @@ class AgenteSupervisor:
         self.evento_pendente = None
         self.cronograma_pendente = None
 
-    def receber_planejamento(self, projeto: str, prazo: str) -> dict:
-        """Recebe e valida as subtarefas devolvidas pelo Planejador."""
+    def interpretar_prazo(self, texto: str) -> date | None:
+        """Prazo de entrega escrito no pedido ("até amanhã", "tenho uma semana", "20/12")."""
+        return interpretar_prazo(texto, datetime.now(config.FUSO))
 
-        if self.planejador is None:
+    def receber_planejamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
+        """Recebe e valida as subtarefas devolvidas pelo Planejador.
+
+        Com ``tarefas`` (um plano já gerado, ex.: o do POST /projetos), valida
+        essas tarefas em vez de chamar o Planejador de novo.
+        """
+
+        if self.planejador is None and tarefas is None:
             return {
                 "status": "erro",
                 "acao": "planejar",
@@ -208,7 +230,11 @@ class AgenteSupervisor:
             }
 
         try:
-            resposta = self.planejador.executar(projeto.strip(), prazo)
+            resposta = (
+                {"tarefas": tarefas}
+                if tarefas is not None
+                else self.planejador.executar(projeto.strip(), prazo)
+            )
 
             plano = RespostaPlanejador.model_validate(resposta)
 
@@ -219,6 +245,14 @@ class AgenteSupervisor:
 
             if any(not tarefa.titulo.strip() for tarefa in tarefas):
                 raise ValueError("Existe uma tarefa com título vazio.")
+
+        except PedidoNaoEntendido as erro:
+            # O Planejador não entendeu o projeto: pede mais detalhes ao usuário.
+            return {
+                "status": "esclarecimento",
+                "acao": "planejar",
+                "mensagem": str(erro)
+            }
 
         except (ValidationError, ValueError, TypeError) as erro:
             return {
@@ -241,16 +275,16 @@ class AgenteSupervisor:
             "dados": {
                 "projeto": projeto.strip(),
                 "prazo": prazo,
-                "tarefas": [tarefa.model_dump() for tarefa in tarefas]
+                "tarefas": [tarefa.model_dump(exclude_none=True) for tarefa in tarefas]
             }
         }
 
         
-    def consultar_periodos_projeto(self, projeto: str, prazo: str) -> dict:
+    def consultar_periodos_projeto(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
         """Recebe as tarefas e consulta os horários livres até o prazo."""
 
         # 1. Recebe e valida as tarefas do Planejador.
-        planejamento = self.receber_planejamento(projeto, prazo)
+        planejamento = self.receber_planejamento(projeto, prazo, tarefas)
 
         if planejamento["status"] != "sucesso":
             return planejamento
@@ -324,7 +358,7 @@ class AgenteSupervisor:
                 "total_minutos_livres": dados["total_minutos_livres"]
             }
         }
-    def preparar_agendamento(self, projeto: str, prazo: str) -> dict:
+    def preparar_agendamento(self, projeto: str, prazo: str, tarefas: list | None = None) -> dict:
         """Classifica o prazo e prepara a previa, sem criar eventos."""
         self.cronograma_pendente = None
         if self.evento_pendente is not None:
@@ -333,7 +367,7 @@ class AgenteSupervisor:
                 "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
             }
 
-        consulta = self.consultar_periodos_projeto(projeto, prazo)
+        consulta = self.consultar_periodos_projeto(projeto, prazo, tarefas)
         if consulta.get("status") != "sucesso":
             return consulta
 

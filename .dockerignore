@@ -1,0 +1,11 @@
+# Lista de permissão: só o que o serviço de story points precisa entra no
+# contexto do build. Credenciais do Google (credentials.json, token_*.json),
+# .venv, frontend e índices do RAG ficam de fora.
+*
+!backend/__init__.py
+!backend/story_points.py
+!backend/servidor_story_points.py
+!destrava/__init__.py
+!destrava/core/__init__.py
+!destrava/core/config.py
+!modelos/rede_neural.pt

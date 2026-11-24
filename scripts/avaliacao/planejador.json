@@ -1,0 +1,18 @@
+[
+  {
+    "pergunta": "Qual deve ser a primeira etapa ao dividir um projeto de software?",
+    "referencia": "A primeira etapa deve ser o esqueleto: a funcionalidade mais fina possível que atravesse todas as camadas (interface, regras e dados) e funcione de ponta a ponta, como criar conta e entrar no sistema."
+  },
+  {
+    "pergunta": "Por que dividir o projeto em fatias verticais e não por camada técnica?",
+    "referencia": "Porque na divisão por camada nada funciona até a última etapa e os problemas de integração aparecem todos juntos; na divisão vertical cada etapa termina com algo demonstrável e os problemas aparecem cedo e isolados."
+  },
+  {
+    "pergunta": "Quais armadilhas evitar ao planejar um pipeline de machine learning?",
+    "referencia": "Fazer etapas só de limpeza sem medir o efeito no resultado, avaliar no mesmo conjunto usado para treinar, começar pelo modelo mais complexo sem uma linha de base e deixar a entrega para depois de meses de experimentos."
+  },
+  {
+    "pergunta": "Como saber se uma etapa do planejamento está bem definida?",
+    "referencia": "Pelo checklist: dá para demonstrar funcionando de ponta a ponta, existe um teste claro de funcionou ou não, depende de poucas etapas anteriores, é pequena o bastante para ser concluída e entrega algo de valor para quem usa o sistema."
+  }
+]

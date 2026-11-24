@@ -61,8 +61,10 @@ def validar_dados_evento(dados: dict) -> dict:
         "inicio": pedido.inicio.isoformat(),
         "fim": pedido.fim.isoformat(),
     }
-    if pedido.descricao:
-        resultado["descricao"] = pedido.descricao
+    for campo in ("descricao", "local", "meta"):
+        valor = getattr(pedido, campo)
+        if valor:
+            resultado[campo] = valor
     return resultado
 
 
@@ -103,6 +105,10 @@ def criar_evento_google(dados: dict, servico) -> dict:
 
     if evento.get("descricao"):
         corpo["description"] = evento["descricao"]
+    if evento.get("local"):
+        corpo["location"] = evento["local"]
+    if evento.get("meta"):
+        corpo["extendedProperties"] = {"private": {"meta": evento["meta"]}}
 
     resultado = servico.events().insert(
         calendarId="primary",
@@ -188,13 +194,18 @@ class AgenteCriar:
         )
 
         # 3. MEIO: cria o evento no Google Calendar.
+        opcionais = {
+            campo: getattr(pedido, campo)
+            for campo in ("descricao", "local", "meta")
+            if getattr(pedido, campo)
+        }
         try:
             criado = self.executar(
                 {
                     "titulo": pedido.titulo,
                     "inicio": pedido.inicio.isoformat(),
                     "fim": pedido.fim.isoformat(),
-                    **({"descricao": pedido.descricao} if pedido.descricao else {}),
+                    **opcionais,
                 }
             )
         except Exception as erro:
@@ -230,6 +241,7 @@ class AgenteCriar:
                     "inicio": inicio_google or pedido.inicio.isoformat(),
                     "fim": fim_google or pedido.fim.isoformat(),
                     "link": criado.get("htmlLink"),
+                    **opcionais,
                 }
             },
             fluxo=fluxo,
