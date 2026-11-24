@@ -518,6 +518,27 @@ class AgenteSupervisor:
             fim = datetime.fromisoformat(evento["fim"])
             if inicio >= fim or not _horario_acordado(inicio, fim):
                 return False
+            # O Visualizar filtra janelas menores que DURACAO_MINIMA_LIVRE.
+            # Para uma parte curta, confira os ocupados do intervalo exato,
+            # sem alterar a configuração de visualização nem forçar um gap.
+            if fim - inicio < config.DURACAO_MINIMA_LIVRE:
+                resposta = self.visualizador.executar_json(
+                    {"inicio": evento["inicio"], "fim": evento["fim"]},
+                    incluir_ocupados=True,
+                )
+                if resposta.get("status") != "sucesso":
+                    return False
+                ocupados = resposta["dados"]["ocupados"]
+                if not isinstance(ocupados, list):
+                    return False
+                for bloco in ocupados:
+                    if bloco["tipo"] == "dia_inteiro" and not config.DIA_INTEIRO_BLOQUEIA:
+                        continue
+                    a = datetime.fromisoformat(bloco["inicio"])
+                    b = datetime.fromisoformat(bloco["fim"])
+                    if a < fim and b > inicio:
+                        return False
+                return True
             resposta = self.visualizador.executar_json({
                 "inicio": evento["inicio"], "fim": evento["fim"]
             })
