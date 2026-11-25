@@ -15,7 +15,7 @@ from destrava.agents.planejador import (
     fundir_configuracao,
     problemas_do_plano,
 )
-from destrava.agents.supervisor import AgenteSupervisor, _data_do_pedido, _horarios_do_pedido
+from destrava.agents.supervisor import AgenteSupervisor, _data_do_pedido
 from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.intencao import classificar_confirmacao, consulta_agenda, pede_projeto
@@ -124,15 +124,6 @@ def test_textos_sem_data_definida(texto):
 
 def test_data_sem_ano_inexistente():
     assert "não existe" in _data_do_pedido("dia 31/02", QUARTA)[1]
-
-
-@pytest.mark.parametrize("texto, esperado", [
-    ("das 11h às 1 da tarde", (time(11), time(13))),
-    ("das 2 às 3 da tarde", (time(14), time(15))),
-    ("das 9h às 1 da tarde", (time(9), time(13))),
-])
-def test_periodo_da_tarde(texto, esperado):
-    assert _horarios_do_pedido(texto) == (esperado, None)
 
 
 def test_consulta_com_data_errada_da_llm_e_corrigida():

@@ -156,72 +156,6 @@ def _data_do_pedido(texto: str, agora: datetime) -> tuple[date | None, str | Non
     return (datas[0] if datas else None), None
 
 
-def _horarios_do_pedido(texto: str) -> tuple[tuple[time, time] | None, str | None]:
-    """Aceita 'das 13h às 14h', 'das 13 às 14' e 'das 1 às 3 da manhã'.
-
-    Expressões não reconhecidas são rejeitadas, nunca preenchidas pela IA.
-    """
-    texto = _normalizar(texto)
-    padrao = (
-        r"\b(?:das|de)\s+(\d{1,2})(?:(?:h|:)(\d{0,2}))?"
-        r"\s+(?:as|a|ate)\s+(\d{1,2})(?:(?:h|:)(\d{0,2}))?"
-        r"(?=\s|$|[.,;!?])"
-    )
-    encontrados = []
-    for achado in re.finditer(padrao, texto):
-        h1, m1, h2, m2 = achado.groups()
-        horas = [int(h1), int(h2)]
-        minutos = [int(m1 or 0), int(m2 or 0)]
-        restante = texto[achado.end():]
-        qualificador = re.match(r"\s+(?:da|de|do)\s+(manha|tarde|noite|madrugada)\b", restante)
-        periodo = qualificador.group(1) if qualificador else None
-
-        if any(h > 23 for h in horas) or any(m > 59 for m in minutos):
-            return None, "Há horários inválidos. Use horas de 00 a 23 e minutos de 00 a 59."
-        if not periodo and max(horas) <= 12 and not any(x in achado.group() for x in ("h", ":")):
-            return None, "Informe se é manhã/tarde/noite ou use formato 24h (ex.: das 13h às 14h)."
-        if periodo in ("tarde", "noite"):
-            if periodo == "noite" and any(h <= 5 for h in horas):
-                return None, "O horário da noite ficou ambíguo. Informe em formato 24h."
-            inicio_dito = horas[0]
-            horas = [h + 12 if 1 <= h <= 11 else h for h in horas]
-            # "das 11h às 1 da tarde": o "da tarde" é do fim; o início é de manhã.
-            if periodo == "tarde" and 6 <= inicio_dito <= 11 and horas[0] > horas[1]:
-                horas[0] = inicio_dito
-        elif periodo in ("manha", "madrugada") and (any(h > 12 for h in horas) or (periodo == "manha" and 12 in horas)):
-            return None, "O período informado não combina com o horário. Use formato 24h."
-        encontrados.append((time(horas[0], minutos[0]), time(horas[1], minutos[1])))
-
-    if len(set(encontrados)) > 1:
-        return None, "Você informou intervalos diferentes. Envie um novo pedido completo."
-    return (encontrados[0] if encontrados else None), None
-
-
-def _conferir_texto(pedido: str, inicio: datetime, fim: datetime, agora: datetime) -> str | None:
-    """Confere se a LLM preservou a data e os horários explícitos do pedido."""
-    data, erro = _data_do_pedido(pedido, agora)
-    if erro:
-        return erro
-    if data is None:
-        return "Informe a data do evento (ex.: amanhã ou 12/11/2026) em um novo pedido completo."
-    intervalo, erro = _horarios_do_pedido(pedido)
-    if erro:
-        return erro
-    if intervalo is None:
-        return "Informe os horários de início e fim em um novo pedido completo (ex.: das 13h às 14h)."
-
-    inicio = inicio.replace(tzinfo=config.FUSO) if inicio.tzinfo is None else inicio.astimezone(config.FUSO)
-    fim = fim.replace(tzinfo=config.FUSO) if fim.tzinfo is None else fim.astimezone(config.FUSO)
-    if inicio.date() != data or fim.date() != data:
-        return "A IA alterou a data solicitada. Nenhum evento foi criado. Envie novamente o pedido completo."
-    if (inicio.time().replace(tzinfo=None), fim.time().replace(tzinfo=None)) != intervalo:
-        h1, h2 = intervalo
-        return (f"A IA interpretou {inicio:%H:%M} às {fim:%H:%M}, "
-                f"mas você informou {h1:%H:%M} às {h2:%H:%M}. "
-                "Nenhum evento foi criado. Envie um novo pedido completo.")
-    return None
-
-
 def _calendario_para_o_prompt(agora: datetime) -> str:
     """Data atual e as datas relativas já calculadas (o LLM erra essa conta)."""
     hoje = agora.date()
@@ -679,25 +613,6 @@ class AgenteSupervisor:
             return self._indisponivel("planejar")
 
         agora_dt = datetime.now(config.FUSO)
-        # A verificação de data inexistente acontece ANTES da Gemma.
-        _, erro_data = _data_do_pedido(pedido, agora_dt)
-        if erro_data:
-            return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": erro_data}
-
-        # Para criação explicitamente solicitada, exige tudo na mesma mensagem.
-        texto_normalizado = _normalizar(pedido)
-        quer_criar = not consulta_agenda(pedido) and re.search(
-            r"\b(crie|criar|cria|agende|agendar|marque|marcar)\b", texto_normalizado
-        )
-        if quer_criar:
-            data, _ = _data_do_pedido(pedido, agora_dt)
-            intervalo, erro_horario = _horarios_do_pedido(pedido)
-            if erro_horario:
-                return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": erro_horario}
-            if data is None or intervalo is None:
-                return {"status": "esclarecimento", "acao": "esclarecer",
-                        "mensagem": "Para criar um evento, informe título, data e horários de início e término na mesma mensagem. Ex.: Crie uma reunião amanhã das 13h às 14h."}
-
         try:
             prompt = PROMPT_SUPERVISOR.format(
                 agora=_calendario_para_o_prompt(agora_dt), pedido=pedido
@@ -749,11 +664,8 @@ class AgenteSupervisor:
                 return {"status": "esclarecimento", "acao": "esclarecer",
                         "mensagem": "Informe título, data, início e término em um novo pedido completo."}
             try:
-                inicio_llm = datetime.fromisoformat(dados["inicio"])
-                fim_llm = datetime.fromisoformat(dados["fim"])
-                erro = _conferir_texto(pedido, inicio_llm, fim_llm, agora_dt)
-                if erro:
-                    return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": erro}
+                datetime.fromisoformat(dados["inicio"])
+                datetime.fromisoformat(dados["fim"])
                 evento = PedidoCriacao.model_validate(dados).model_dump(mode="json", exclude_none=True)
             except ValidationError as erro:
                 detalhe = erro.errors()[0].get("msg", "Dados inválidos.")

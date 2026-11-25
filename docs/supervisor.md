@@ -11,7 +11,7 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 | Pedido | Ação (`acao`) | O que acontece |
 |---|---|---|
 | Consultar horários ("o que tenho livre amanhã?") | `visualizar` | Chama o agente Visualizar e responde com os horários livres |
-| Criar um evento | `criar` | Valida título, data e horário, confere que o horário está livre e fora do sono, e pede confirmação. Com o "sim", chama o agente Criar |
+| Criar um evento | `criar` | A LLM é a única etapa de interpretação (se faltar data ou horário, ou estiver ambíguo, ela devolve `esclarecer`). Depois o código valida (Pydantic, data futura, sono, agenda livre) e mostra a prévia com confirmação. Com o "sim", chama o agente Criar |
 | Agendar o plano de um projeto | `planejar` | Feito pelas rotas `POST /projetos/agendar` e `/confirmar` (abaixo), não pelo texto do chat |
 | Pedido incompleto | `esclarecer` | Devolve uma pergunta ao usuário |
 | Fora do escopo | `fora_escopo` | O chat responde com o "não entendi" do Planejador e a próxima mensagem vai para ele |
@@ -70,4 +70,4 @@ Os testes simulam o Google e o Ollama. Scripts manuais (precisam do Ollama): `py
 
 - Não guarda histórico nem mais de uma confirmação pendente.
 - Editar e excluir por texto ainda não existem.
-- O LLM pequeno pode errar a interpretação: por isso o Supervisor valida os dados (`PedidoCriacao`, data futura, horário de sono) e sempre pede confirmação antes de criar.
+- O LLM pequeno pode errar a interpretação: por isso, depois da interpretação da LLM (única etapa, sem pré-checagem por texto), o Supervisor valida os dados por código (`PedidoCriacao`, data futura, horário de sono, agenda livre) e sempre pede confirmação antes de criar.

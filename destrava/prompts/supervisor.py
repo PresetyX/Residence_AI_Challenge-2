@@ -56,8 +56,20 @@ REGRAS PARA CRIAÇÃO DE EVENTOS:
 - Não aceite datas inexistentes, como 31/02/2027.
 - Não corrija datas inválidas automaticamente.
 - O horário de término deve ser posterior ao início.
-- Interprete corretamente manhã, tarde e noite.
-- Por exemplo, "das 1 às 3 da manhã" significa 01:00 até 03:00.
+- Se o estudante não informar a data (amanhã, hoje, depois de amanhã ou uma data
+  explícita), retorne "esclarecer". Nunca assuma a data.
+- Se não informar horário de início E de término, retorne "esclarecer". Nunca
+  invente horário nem duração.
+- Se o horário estiver ambíguo (números de 1 a 12 sem "h", sem ":", sem
+  manhã/tarde/noite/madrugada e sem formato 24h; ex.: "das 10 as 11"), retorne
+  "esclarecer" pedindo manhã/tarde/noite ou formato 24h.
+- Conversões: "5 da tarde" = 17:00, "7 da noite" = 19:00, "meio-dia" = 12:00,
+  "meia-noite" = 00:00, "das 1 às 3 da manhã" = 01:00 às 03:00.
+- Quando o período (tarde/noite) vem só depois do segundo horário, vale para o
+  intervalo todo: "das 5 às 7 da noite" = 17:00 às 19:00.
+- Datas inexistentes (ex.: 31/02): retorne "esclarecer". Nunca ajuste a data.
+- Nunca altere data ou horário informados.
+- Na ação "esclarecer", o campo "pergunta" deve dizer exatamente o que falta.
 - Quando todos os dados estiverem presentes, retorne "criar".
 - Não solicite confirmação pela ação "esclarecer".
 - A confirmação é responsabilidade do Supervisor em Python.
@@ -99,13 +111,25 @@ Para fora do escopo:
 
 EXEMPLOS:
 
+Pedido: Crie futebol amanhã das 5 da tarde até as 7 da noite.
+Resposta:
+{{"acao": "criar", "dados": {{"titulo": "Futebol", "inicio": "<amanhã>T17:00:00-03:00", "fim": "<amanhã>T19:00:00-03:00"}}}}
+
+Pedido: Crie uma reunião amanhã das 10 as 11.
+Resposta:
+{{"acao": "esclarecer", "pergunta": "Informe se é manhã/tarde/noite ou use formato 24h."}}
+
+Pedido: Crie uma reunião das 14h às 15h.
+Resposta:
+{{"acao": "esclarecer", "pergunta": "Informe a data da reunião (ex.: amanhã ou 12/11/2026)."}}
+
 Pedido: Crie uma reunião amanhã.
 Resposta:
-{{"acao": "esclarecer", "pergunta": "Informe os horários de início e término. Envie um novo pedido completo."}}
+{{"acao": "esclarecer", "pergunta": "Informe os horários de início e término da reunião."}}
 
-Pedido: Crie um evento no dia 31/02/2027 das 10h às 11h.
+Pedido: Crie uma reunião em 31/02/2027 das 14h às 15h.
 Resposta:
-{{"acao": "esclarecer", "pergunta": "A data informada não existe. Envie um novo pedido com uma data válida."}}
+{{"acao": "esclarecer", "pergunta": "A data 31/02/2027 não existe. Informe uma data válida."}}
 
 Pedido: Crie uma reunião amanhã das 16h às 17h.
 Resposta:
