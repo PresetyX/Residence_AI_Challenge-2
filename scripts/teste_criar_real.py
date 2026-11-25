@@ -14,7 +14,7 @@ from datetime import datetime
 
 from pydantic import ValidationError
 
-from destrava.agents.criar import AgenteCriar
+from destrava.tools.criar import AgenteCriar
 from destrava.core.models import PedidoCriacao
 
 

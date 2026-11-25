@@ -15,7 +15,7 @@ from backend.chat import router as chat_router
 from backend import perfil
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo

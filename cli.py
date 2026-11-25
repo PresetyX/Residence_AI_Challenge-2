@@ -37,13 +37,13 @@ Uso (na raiz do projeto):
 import json
 from datetime import datetime, timedelta
 
-from destrava.agents.criar import AgenteCriar
+from destrava.tools.criar import AgenteCriar
 from destrava.agents.planejador import (
     AgentePlanejador,
     ErroPlanejador,
     PedidoNaoEntendido,
 )
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 
 SAIR = ("sair", "exit", "quit")

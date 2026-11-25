@@ -10,7 +10,7 @@ Por enquanto o Supervisor não chama este agente: pedidos de edição no chat vo
 
 ## Contrato
 
-Classe `AgenteEditar` em `destrava/agents/editar.py`, mesmo formato de resposta dos outros agentes ([`contrato.md`](contrato.md)).
+Classe `AgenteEditar` em `destrava/tools/editar.py`, mesmo formato de resposta dos outros agentes ([`contrato.md`](contrato.md)).
 
 | Método | Entrada | Saída |
 |---|---|---|

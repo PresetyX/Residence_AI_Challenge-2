@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from destrava.agents import criar, visualizar
+from destrava.tools import criar, visualizar
 from destrava.core import config
 
 

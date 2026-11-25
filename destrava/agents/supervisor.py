@@ -8,9 +8,9 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from destrava.agents.criar import AgenteCriar
+from destrava.tools.criar import AgenteCriar
 from destrava.agents.planejador import PedidoNaoEntendido
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao

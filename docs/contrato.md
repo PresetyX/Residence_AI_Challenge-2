@@ -14,7 +14,7 @@ Os quatro agentes da agenda (visualizar, criar, editar e excluir) devolvem o **m
 |---|---|---|
 | visualizar | `PedidoVisualizacao` | `{"inicio": "...", "fim": "..."}` (se `fim` for igual a `inicio`, o período vira o dia inteiro) |
 | criar | `PedidoCriacao` | `{"titulo": "...", "inicio": "...", "fim": "..."}` |
-| editar | `PedidoEdicao` (`destrava/agents/editar.py`) | `{"id": "...", "titulo"?, "inicio"?, "fim"?, "descricao"?, "local"?}` (só os campos enviados mudam; `inicio` e `fim` vêm juntos) |
+| editar | `PedidoEdicao` (`destrava/tools/editar.py`) | `{"id": "...", "titulo"?, "inicio"?, "fim"?, "descricao"?, "local"?}` (só os campos enviados mudam; `inicio` e `fim` vêm juntos) |
 | excluir | dict com o ID | `{"id": "..."}` |
 
 ## Saída
