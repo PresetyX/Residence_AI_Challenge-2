@@ -9,6 +9,8 @@ import unicodedata
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from destrava.tools.criar import AgenteCriar
+from destrava.tools.editar import AgenteEditar, PedidoEdicao
+from destrava.tools.excluir import AgenteExcluir
 from destrava.agents.planejador import PedidoNaoEntendido
 from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
@@ -20,7 +22,7 @@ from destrava.prompts.supervisor import PROMPT_SUPERVISOR
 
 
 class InterpretacaoSupervisor(BaseModel):
-    acao: Literal["visualizar", "criar", "planejar", "esclarecer", "fora_escopo"]
+    acao: Literal["visualizar", "criar", "editar", "excluir", "planejar", "esclarecer", "fora_escopo"]
     dados: dict | None = None
     pergunta: str | None = None
 
@@ -182,14 +184,19 @@ class AgenteSupervisor:
         criador: AgenteCriar | None = None,
         consultar_llm: Callable[[str], str] | None = None,
         planejador=None,
+        editor: AgenteEditar | None = None,
+        excluidor: AgenteExcluir | None = None,
     ):
         self.visualizador = visualizador if visualizador is not None else AgenteVisualizar()
         self.criador = criador if criador is not None else AgenteCriar()
+        self.editor = editor if editor is not None else AgenteEditar()
+        self.excluidor = excluidor if excluidor is not None else AgenteExcluir()
         self.consultar_llm = consultar_llm if consultar_llm is not None else perguntar
         self.planejador = planejador
         # Apenas estados de confirmação; não guardamos pedidos incompletos.
         self.evento_pendente = None
         self.cronograma_pendente = None
+        self.operacao_pendente = None
 
     def interpretar_prazo(self, texto: str) -> date | None:
         """Prazo de entrega escrito no pedido ("até amanhã", "tenho uma semana", "20/12")."""
@@ -365,6 +372,11 @@ class AgenteSupervisor:
             return {
                 "status": "erro", "acao": "planejar",
                 "mensagem": "Confirme ou cancele o evento individual pendente primeiro."
+            }
+        if self.operacao_pendente is not None:
+            return {
+                "status": "erro", "acao": "planejar",
+                "mensagem": "Confirme ou cancele a alteração de evento pendente primeiro."
             }
 
         consulta = self.consultar_periodos_projeto(projeto, prazo, tarefas)
@@ -554,11 +566,202 @@ class AgenteSupervisor:
             return False
         return False
 
+    def _localizar_evento(self, dados: dict) -> tuple[dict | None, dict | None]:
+        """Localiza um evento pelo título e dia antes de propor uma alteração."""
+        titulo = dados.get("titulo_evento")
+        dia_texto = dados.get("data_evento")
+        if not isinstance(titulo, str) or not titulo.strip():
+            return None, {"status": "esclarecimento", "acao": "esclarecer",
+                          "mensagem": "Informe o título do evento que deseja alterar ou excluir."}
+        try:
+            dia = date.fromisoformat(dia_texto)
+            if dia.isoformat() != dia_texto:
+                raise ValueError()
+        except (ValueError, TypeError):
+            return None, {"status": "esclarecimento", "acao": "esclarecer",
+                          "mensagem": "Informe a data do evento que deseja alterar ou excluir."}
+
+        try:
+            resposta = self.visualizador.executar_json(
+                {
+                    "inicio": datetime.combine(dia, time.min, tzinfo=config.FUSO).isoformat(),
+                    "fim": datetime.combine(dia + timedelta(days=1), time.min, tzinfo=config.FUSO).isoformat(),
+                },
+                incluir_ocupados=True,
+            )
+        except Exception as erro:
+            return None, {"status": "erro", "acao": "visualizar",
+                          "mensagem": f"Falha ao localizar o evento na agenda: {erro}"}
+
+        if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
+            detalhe = resposta.get("erro") if isinstance(resposta, dict) else None
+            mensagem = detalhe.get("mensagem") if isinstance(detalhe, dict) else "Falha desconhecida."
+            return None, {"status": "erro", "acao": "visualizar",
+                          "mensagem": f"Não foi possível consultar os eventos: {mensagem}"}
+
+        dados_resposta = resposta.get("dados")
+        ocupados = dados_resposta.get("ocupados") if isinstance(dados_resposta, dict) else None
+        if not isinstance(ocupados, list):
+            return None, {"status": "erro", "acao": "visualizar",
+                          "mensagem": "A agenda não devolveu uma lista válida de eventos."}
+
+        eventos = [
+            evento for evento in ocupados
+            if isinstance(evento, dict)
+            and evento.get("tipo") in ("evento", "dia_inteiro")
+            and str(evento.get("inicio", ""))[:10] == dia.isoformat()
+        ]
+        titulo_normalizado = _normalizar(titulo.strip())
+        candidatos = [
+            evento for evento in eventos
+            if isinstance(evento.get("titulo"), str)
+            and _normalizar(evento["titulo"].strip()) == titulo_normalizado
+        ]
+        hora = dados.get("hora_evento")
+        if hora is not None:
+            if not isinstance(hora, str) or not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", hora):
+                return None, {"status": "esclarecimento", "acao": "esclarecer",
+                              "mensagem": "Informe o horário de início do evento no formato HH:MM."}
+            candidatos = [
+                evento for evento in candidatos
+                if str(evento.get("inicio", ""))[11:16] == hora
+            ]
+
+        if len(candidatos) == 1:
+            evento = candidatos[0]
+            return {
+                "id": evento.get("id"),
+                "titulo": evento.get("titulo"),
+                "inicio": evento.get("inicio"),
+                "fim": evento.get("fim"),
+            }, None
+
+        if candidatos:
+            opcoes = ", ".join(
+                f"{evento.get('titulo')} às {str(evento.get('inicio', ''))[11:16]}"
+                for evento in candidatos
+            )
+            mensagem = f"Encontrei mais de um evento com esse título nessa data ({opcoes}). Informe o horário de início."
+        else:
+            disponiveis = ", ".join(
+                f"{evento.get('titulo')} às {str(evento.get('inicio', ''))[11:16]}"
+                for evento in eventos
+            )
+            complemento = f" Eventos nessa data: {disponiveis}." if disponiveis else " Não há eventos nessa data."
+            mensagem = f"Não encontrei '{titulo.strip()}' nessa data.{complemento} Confira o título e a data."
+        return None, {"status": "esclarecimento", "acao": "esclarecer", "mensagem": mensagem}
+
+    def _preparar_operacao_evento(self, acao: str, dados: dict | None) -> dict:
+        """Resolve o alvo e deixa edição/exclusão aguardando confirmação."""
+        dados_esperados = {"titulo_evento", "data_evento"}
+        dados_opcionais = {"hora_evento"}
+        if acao == "editar":
+            dados_esperados.add("alteracoes")
+        if acao == "editar" and isinstance(dados, dict):
+            if not dados_esperados.issubset(dados) or set(dados) - dados_esperados - dados_opcionais:
+                return {"status": "esclarecimento", "acao": "esclarecer",
+                        "mensagem": "Informe o título e a data do evento, além dos campos que deseja alterar."}
+            alteracoes = dados.get("alteracoes")
+            campos_validos = {"titulo", "inicio", "fim", "descricao", "local"}
+            if not isinstance(alteracoes, dict) or not alteracoes or set(alteracoes) - campos_validos:
+                return {"status": "esclarecimento", "acao": "esclarecer",
+                        "mensagem": "Diga quais informações do evento deseja alterar."}
+            try:
+                pedido_edicao = PedidoEdicao.model_validate({"id": "alvo", **alteracoes})
+                alteracoes = pedido_edicao.model_dump(mode="json", exclude={"id"}, exclude_none=True)
+            except ValidationError as erro:
+                detalhe = erro.errors(include_url=False, include_context=False)[0].get("msg", "Dados inválidos.")
+                return {"status": "esclarecimento", "acao": "esclarecer",
+                        "mensagem": detalhe.removeprefix("Value error, ")}
+            if not alteracoes:
+                return {"status": "esclarecimento", "acao": "esclarecer",
+                        "mensagem": "Diga quais informações do evento deseja alterar."}
+        elif acao == "excluir" and isinstance(dados, dict):
+            if not dados_esperados.issubset(dados) or set(dados) - dados_esperados - dados_opcionais:
+                return {"status": "esclarecimento", "acao": "esclarecer",
+                        "mensagem": "Informe o título e a data do evento que deseja excluir."}
+            alteracoes = None
+        else:
+            return {"status": "esclarecimento", "acao": "esclarecer",
+                    "mensagem": "Informe os dados do evento e as alterações desejadas."}
+
+        evento, erro = self._localizar_evento(dados)
+        if erro:
+            return erro
+        if not evento or not isinstance(evento.get("id"), str) or not evento["id"]:
+            return {"status": "erro", "acao": acao,
+                    "mensagem": "O evento localizado não tem um ID válido. Nenhuma alteração foi feita."}
+
+        entrada = {"id": evento["id"], **(alteracoes or {})}
+        self.operacao_pendente = {"acao": acao, "entrada": entrada, "evento": evento}
+        inicio = datetime.fromisoformat(evento["inicio"])
+        fim = datetime.fromisoformat(evento["fim"])
+        quando = f"{inicio:%d/%m/%Y}, às {inicio:%H:%M}"
+        if fim.date() == inicio.date():
+            quando += f"-{fim:%H:%M}"
+        if acao == "excluir":
+            mensagem = f"Confirma a exclusão de '{evento['titulo']}' em {quando}? Responda 'sim' ou 'não'."
+        else:
+            descricao = []
+            rotulos = {"titulo": "título", "inicio": "início", "fim": "fim", "descricao": "descrição", "local": "local"}
+            for campo, valor in alteracoes.items():
+                exibido = valor
+                if campo in ("inicio", "fim"):
+                    momento = datetime.fromisoformat(valor)
+                    exibido = momento.strftime("%d/%m/%Y às %H:%M")
+                descricao.append(f"{rotulos[campo]}: {exibido or '(vazio)'}")
+            mensagem = (
+                f"Confirma a edição de '{evento['titulo']}' em {quando}? "
+                f"Alterações: {'; '.join(descricao)}. Responda 'sim' ou 'não'."
+            )
+        return {"status": "confirmacao", "acao": acao, "mensagem": mensagem}
+
+    def _confirmar_operacao_evento(self, confirmado: bool) -> dict:
+        operacao = self.operacao_pendente
+        self.operacao_pendente = None
+        if not confirmado:
+            return {"status": "cancelado", "acao": operacao["acao"],
+                    "mensagem": "Operação cancelada. Nenhuma alteração foi feita."}
+
+        acao = operacao["acao"]
+        agente = self.editor if acao == "editar" else self.excluidor
+        try:
+            resposta = agente.executar_json(operacao["entrada"])
+        except Exception as erro:
+            return {"status": "erro", "acao": acao, "mensagem": f"Falha ao {acao} o evento: {erro}"}
+        if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
+            detalhe = resposta.get("erro") if isinstance(resposta, dict) else None
+            mensagem = detalhe.get("mensagem") if isinstance(detalhe, dict) else "Falha desconhecida."
+            return {"status": "erro", "acao": acao, "mensagem": f"Não foi possível {acao} o evento: {mensagem}"}
+
+        if acao == "editar":
+            evento = (resposta.get("dados") or {}).get("evento")
+            if not isinstance(evento, dict):
+                return {"status": "erro", "acao": acao,
+                        "mensagem": "A edição foi confirmada, mas os dados do evento não foram devolvidos. Confira sua agenda."}
+            return {"status": "sucesso", "acao": acao,
+                    "mensagem": f"Evento '{evento.get('titulo', 'sem título')}' atualizado com sucesso!",
+                    "dados": {"evento": evento}}
+
+        evento = operacao["evento"]
+        return {"status": "sucesso", "acao": acao,
+                "mensagem": f"Evento '{evento['titulo']}' excluído com sucesso.",
+                "dados": {"evento_id": evento["id"], "titulo": evento["titulo"], "evento": evento}}
+
     def executar(self, pedido: str) -> dict:
         """Interpreta cada pedido de forma independente, sem memória de esclarecimentos."""
         if not isinstance(pedido, str) or not pedido.strip():
             return {"status": "erro", "acao": "esclarecer", "mensagem": "Descreva o que deseja fazer."}
         pedido = pedido.strip()
+
+        if self.operacao_pendente is not None:
+            resposta = _normalizar(pedido)
+            if resposta in ("nao", "cancelar"):
+                return self._confirmar_operacao_evento(False)
+            if resposta == "sim":
+                return self._confirmar_operacao_evento(True)
+            return {"status": "confirmacao", "acao": self.operacao_pendente["acao"],
+                    "mensagem": "Responda 'sim' para confirmar ou 'não' para cancelar a operação."}
 
         # A única mensagem contextual é 'sim'/'não' para um evento já confirmado na prévia.
         if self.evento_pendente is not None:
@@ -676,9 +879,12 @@ class AgenteSupervisor:
                                  f"no dia {inicio:%d/%m/%Y}, das {inicio:%H:%M} às {fim:%H:%M}? "
                                  "Responda 'sim' ou 'não'.")}
 
+        if interpretacao.acao in ("editar", "excluir"):
+            return self._preparar_operacao_evento(interpretacao.acao, interpretacao.dados)
+
         mensagens = {
             "planejar": "O Planejador ainda não foi integrado ao fluxo por texto do Supervisor.",
-            "fora_escopo": "Posso ajudar a consultar a agenda ou criar eventos.",
+            "fora_escopo": "Posso ajudar a consultar, criar, editar ou excluir eventos da agenda.",
         }
         return {"status": "indisponivel", "acao": interpretacao.acao,
                 "mensagem": mensagens.get(interpretacao.acao, "Essa funcionalidade ainda não está disponível.")}

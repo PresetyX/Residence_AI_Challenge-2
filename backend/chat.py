@@ -5,7 +5,7 @@ Contrato (frontend/src/services/inference-service.ts):
     Saída:   NDJSON, um objeto por linha:
         {"tipo": "status", "valor": "..."}            progresso antes da resposta
         {"tipo": "token", "valor": "..."}             pedaço do texto da resposta
-        {"tipo": "acao_agenda", "acao": "created", "evento": {...}}
+        {"tipo": "acao_agenda", "acao": "created" | "updated" | "deleted", "evento": {...}}
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
         {"tipo": "pedir_projeto"}                     fora do escopo: a próxima mensagem vai ao Planejador
         {"tipo": "fim_conversa"}                      pedido concluído: a próxima mensagem abre outra conversa
@@ -55,7 +55,10 @@ def _supervisor(request: Request) -> AgenteSupervisor:
     """Cria o Supervisor na primeira mensagem (e não ao subir o servidor)."""
     estado = request.app.state
     if getattr(estado, "supervisor", None) is None:
-        estado.supervisor = AgenteSupervisor(planejador=getattr(estado, "planejador", None))
+        estado.supervisor = AgenteSupervisor(
+            visualizador=getattr(estado, "visualizador", None),
+            planejador=getattr(estado, "planejador", None),
+        )
     return estado.supervisor
 
 
@@ -63,14 +66,19 @@ def _linha(objeto: dict) -> str:
     return json.dumps(objeto, ensure_ascii=False) + "\n"
 
 
-def _eventos_criados(resposta: dict) -> list[dict]:
+def _acoes_agenda(resposta: dict) -> list[tuple[str, dict]]:
     if resposta.get("status") not in ("sucesso", "parcial"):
         return []
     dados = resposta.get("dados")
-    if resposta.get("acao") == "criar" and isinstance(dados, dict) and dados.get("id"):
-        return [dados]
+    acao = resposta.get("acao")
+    if acao == "criar" and isinstance(dados, dict) and dados.get("id"):
+        return [("created", dados)]
+    if acao == "editar" and isinstance(dados, dict) and isinstance(dados.get("evento"), dict):
+        return [("updated", dados["evento"])]
+    if acao == "excluir" and isinstance(dados, dict) and isinstance(dados.get("evento"), dict):
+        return [("deleted", dados["evento"])]
     if isinstance(dados, dict) and isinstance(dados.get("eventos_criados"), list):
-        return [evento for evento in dados["eventos_criados"] if isinstance(evento, dict)]
+        return [("created", evento) for evento in dados["eventos_criados"] if isinstance(evento, dict)]
     return []
 
 
@@ -104,12 +112,12 @@ def respostas_do_supervisor(
     for pedaco in re.findall(r"\S+\s*|\s+", mensagem):
         yield _linha({"tipo": "token", "valor": pedaco})
 
-    for evento in _eventos_criados(resposta):
-        yield _linha({"tipo": "acao_agenda", "acao": "created", "evento": evento})
+    for acao, evento in _acoes_agenda(resposta):
+        yield _linha({"tipo": "acao_agenda", "acao": acao, "evento": evento})
 
     if pede_projeto:
         yield _linha({"tipo": "pedir_projeto"})
-    # Pedido que o Supervisor ainda não faz (editar, excluir...): oferecer o painel manual.
+    # Pedido que o Supervisor ainda não encaminha: oferecer o painel manual.
     elif resposta.get("status") == "indisponivel":
         yield _linha({"tipo": "sugerir_painel_manual"})
 
@@ -120,9 +128,9 @@ def respostas_do_supervisor(
 
 
 def conversa_terminou(resposta: dict) -> bool:
-    """Evento avulso criado/cancelado ou plano agendado/cancelado/impossível."""
+    """Operação de agenda concluída ou plano agendado/cancelado/impossível."""
     status, acao = resposta.get("status"), resposta.get("acao")
-    if acao == "criar":
+    if acao in ("criar", "editar", "excluir"):
         return status in ("sucesso", "parcial", "cancelado")
     if acao == "planejar":
         return status in ("sucesso", "parcial", "cancelado") or resposta.get("classificacao") == "impossivel"
@@ -133,6 +141,7 @@ def zerar_supervisor(supervisor: AgenteSupervisor) -> None:
     """Esquece qualquer confirmação pendente (evento avulso ou cronograma)."""
     supervisor.evento_pendente = None
     supervisor.cronograma_pendente = None
+    supervisor.operacao_pendente = None
 
 
 @router.post("/chat/reiniciar", status_code=204)
@@ -187,6 +196,7 @@ def agendar_projeto(corpo: AgendarRequest, request: Request) -> dict:
     with _lock:
         # Um plano novo substitui um evento avulso que estava esperando "sim".
         supervisor.evento_pendente = None
+        supervisor.operacao_pendente = None
         resposta = supervisor.preparar_agendamento(corpo.projeto, corpo.prazo, corpo.tarefas)
         if resposta.get("status") == "confirmacao" and corpo.meta:
             for evento in supervisor.cronograma_pendente or []:

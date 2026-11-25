@@ -4,9 +4,9 @@
 
 ## Objetivo
 
-Exclui um evento do Google Agenda a partir do **ID**. Confere que o evento existe e não está cancelado, exclui e devolve o resultado em JSON. **Não usa LLM** e não interpreta texto livre. Como a exclusão não tem volta, a **confirmação do usuário acontece antes** da chamada (no painel Agenda, que mostra o modal de exclusão).
+Exclui um evento do Google Agenda a partir do **ID**. Confere que o evento existe e não está cancelado, exclui e devolve o resultado em JSON. **Não usa LLM** e não interpreta texto livre. Como a exclusão não tem volta, a **confirmação do usuário acontece antes** da chamada, tanto no chat do Supervisor quanto no painel Agenda.
 
-Por enquanto o Supervisor não chama este agente: pedidos de exclusão no chat voltam como `indisponivel` e o chat oferece o painel manual.
+No chat, o Supervisor localiza o evento pelo título e data originais. Se mais de um evento corresponder, pede o horário de início antes de exibir a confirmação.
 
 ## Contrato
 
@@ -37,7 +37,7 @@ Etapas do `fluxo`: `validacao` / `google_calendar` / `conferencia`.
 
 ## Quem chama
 
-`DELETE /calendar/events/{id}` (`backend/calendario.py`), usado pelo painel Agenda. Ver [`api.md`](api.md).
+`AgenteSupervisor` no chat e `DELETE /calendar/events/{id}` (`backend/calendario.py`) no painel Agenda. Ver [`supervisor.md`](supervisor.md) e [`api.md`](api.md).
 
 ## Dependências do core
 

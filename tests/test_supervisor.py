@@ -89,6 +89,15 @@ def simular_criador():
     return criador
 
 
+def simular_eventos(eventos):
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"ocupados": eventos},
+    }
+    return visualizador
+
+
 # TESTE 1 - Verifica a consulta da agenda.
 def test_visualizar_encaminha_json_ao_agente():
     evento = evento_teste()
@@ -298,3 +307,170 @@ def test_datas_invalidas_nao_consultam_google():
     assert resposta["status"] == "esclarecimento"
 
     visualizador.executar_json.assert_not_called()
+
+
+def test_edicao_localiza_evento_e_so_edita_apos_confirmacao():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-1",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    editor = MagicMock()
+    editor.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"evento": {**evento_agenda, "titulo": "Reunião atualizada"}},
+    }
+    dados = {
+        "titulo_evento": "Reunião",
+        "data_evento": evento["inicio"][:10],
+        "alteracoes": {"titulo": "Reunião atualizada"},
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        editor=editor,
+        consultar_llm=simular_llm("editar", dados),
+    )
+
+    confirmacao = supervisor.executar("Mude a reunião de amanhã para Reunião atualizada")
+    assert confirmacao["status"] == "confirmacao"
+    editor.executar_json.assert_not_called()
+
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    assert resposta["acao"] == "editar"
+    editor.executar_json.assert_called_once_with({"id": "evt-1", "titulo": "Reunião atualizada"})
+
+
+def test_exclusao_cancela_sem_chamar_agente():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-2",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    excluidor = MagicMock()
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("não")
+    assert resposta["status"] == "cancelado"
+    excluidor.executar_json.assert_not_called()
+
+
+def test_exclusao_chama_agente_apos_confirmacao():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-3",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    excluidor = MagicMock()
+    excluidor.executar_json.return_value = {"status": "sucesso"}
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    assert resposta["acao"] == "excluir"
+    excluidor.executar_json.assert_called_once_with({"id": "evt-3"})
+
+
+def test_eventos_ambiguos_pedem_horario_sem_escrever_na_agenda():
+    evento = evento_teste()
+    inicio_segundo = datetime.fromisoformat(evento["inicio"]) + timedelta(hours=2)
+    fim_segundo = datetime.fromisoformat(evento["fim"]) + timedelta(hours=2)
+    eventos = [
+        {
+            "id": "evt-1",
+            "titulo": evento["titulo"],
+            "inicio": evento["inicio"],
+            "fim": evento["fim"],
+            "tipo": "evento",
+        },
+        {
+            "id": "evt-2",
+            "titulo": evento["titulo"],
+            "inicio": inicio_segundo.isoformat(),
+            "fim": fim_segundo.isoformat(),
+            "tipo": "evento",
+        },
+    ]
+    excluidor = MagicMock()
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos(eventos),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    resposta = supervisor.executar("Exclua a reunião de amanhã")
+    assert resposta["status"] == "esclarecimento"
+    assert "horário de início" in resposta["mensagem"]
+    excluidor.executar_json.assert_not_called()
+
+
+def test_horario_do_evento_desambigua_a_exclusao():
+    evento = evento_teste()
+    inicio_segundo = datetime.fromisoformat(evento["inicio"]) + timedelta(hours=2)
+    fim_segundo = datetime.fromisoformat(evento["fim"]) + timedelta(hours=2)
+    eventos = [
+        {
+            "id": "evt-1",
+            "titulo": evento["titulo"],
+            "inicio": evento["inicio"],
+            "fim": evento["fim"],
+            "tipo": "evento",
+        },
+        {
+            "id": "evt-2",
+            "titulo": evento["titulo"],
+            "inicio": inicio_segundo.isoformat(),
+            "fim": fim_segundo.isoformat(),
+            "tipo": "evento",
+        },
+    ]
+    excluidor = MagicMock()
+    excluidor.executar_json.return_value = {"status": "sucesso"}
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos(eventos),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {
+                "titulo_evento": "Reunião",
+                "data_evento": evento["inicio"][:10],
+                "hora_evento": inicio_segundo.strftime("%H:%M"),
+            },
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã das 12h")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    excluidor.executar_json.assert_called_once_with({"id": "evt-2"})
