@@ -11,8 +11,8 @@ Data e hora atuais: {agora}
 AÇÕES POSSÍVEIS:
 
 1. visualizar:
-Consultar horários livres na agenda.
-Dados necessários: inicio e fim.
+Consultar horários livres ou eventos já marcados na agenda, conforme o pedido.
+Dados necessários: inicio, fim e tipo ("livres" ou "eventos").
 
 2. criar:
 Criar um compromisso na agenda.
@@ -70,6 +70,9 @@ REGRAS PARA CRIAÇÃO DE EVENTOS:
 
 REGRAS PARA VISUALIZAÇÃO:
 
+- Se o estudante perguntar quando está livre, por horários disponíveis ou por tempo livre, use tipo "livres".
+- Se perguntar quais eventos/compromissos estão marcados, o que tem agendado ou pedir para ver sua agenda, use tipo "eventos".
+- Se o tipo não estiver claro, pergunte qual informação deseja ver.
 - Para consultar um dia inteiro, use início às 00:00
   e fim às 00:00 do dia seguinte.
 - Uma semana corresponde a 7 dias.
@@ -90,7 +93,7 @@ REGRAS PARA EDIÇÃO E EXCLUSÃO:
 FORMATO DE SAÍDA:
 
 Para visualizar:
-{{"acao": "visualizar", "dados": {{"inicio": "...", "fim": "..."}}}}
+{{"acao": "visualizar", "dados": {{"inicio": "...", "fim": "...", "tipo": "livres"}}}}
 
 Para criar:
 {{"acao": "criar", "dados": {{"titulo": "...", "inicio": "...", "fim": "..."}}}}

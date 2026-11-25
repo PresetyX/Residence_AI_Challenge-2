@@ -10,7 +10,7 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 
 | Pedido | Ação (`acao`) | O que acontece |
 |---|---|---|
-| Consultar horários ("o que tenho livre amanhã?") | `visualizar` | Chama o agente Visualizar e responde com os horários livres |
+| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?") | `visualizar` | Escolhe horários livres ou eventos marcados conforme o pedido |
 | Criar um evento | `criar` | Valida título, data e horário, confere que o horário está livre e fora do sono, e pede confirmação. Com o "sim", chama o agente Criar |
 | Editar um evento | `editar` | Localiza pelo título e data originais; se houver um único resultado, mostra as alterações e pede confirmação antes de chamar Editar |
 | Excluir um evento | `excluir` | Localiza pelo título e data originais; se houver um único resultado, pede confirmação antes de chamar Excluir |

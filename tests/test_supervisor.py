@@ -124,6 +124,74 @@ def test_visualizar_encaminha_json_ao_agente():
     visualizador.executar_json.assert_called_once()
 
 
+def test_visualizar_eventos_marcados_pede_ocupados_e_omite_blocos_de_sono():
+    evento = evento_teste()
+    inicio = datetime.fromisoformat(evento["inicio"]).replace(hour=0)
+    fim = inicio + timedelta(days=1)
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {
+            "livres": [],
+            "total_minutos_livres": 0,
+            "ocupados": [
+                {
+                    "id": "e1",
+                    "titulo": "Reunião",
+                    "inicio": evento["inicio"],
+                    "fim": evento["fim"],
+                    "tipo": "evento",
+                },
+                {
+                    "id": "sono",
+                    "titulo": "Sono",
+                    "inicio": inicio.isoformat(),
+                    "fim": (inicio + timedelta(hours=8)).isoformat(),
+                    "tipo": "sono",
+                },
+            ],
+        },
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "tipo": "eventos"},
+        ),
+    )
+
+    resposta = supervisor.executar("O que tenho agendado amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Reunião" in resposta["mensagem"]
+    assert "Sono" not in resposta["mensagem"]
+    assert [evento["id"] for evento in resposta["dados"]["eventos"]] == ["e1"]
+    visualizador.executar_json.assert_called_once_with(
+        {"inicio": inicio.isoformat(), "fim": fim.isoformat()},
+        incluir_ocupados=True,
+    )
+
+
+def test_consulta_do_planejador_mantem_visualizacao_de_horarios_livres():
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"livres": [], "total_minutos_livres": 0},
+    }
+    prazo = (datetime.now(config.FUSO).date() + timedelta(days=3)).isoformat()
+    supervisor = AgenteSupervisor(visualizador=visualizador)
+
+    resposta = supervisor.consultar_periodos_projeto(
+        "Projeto",
+        prazo,
+        tarefas=[{"etapa": 1, "titulo": "Tarefa"}],
+    )
+
+    assert resposta["status"] == "sucesso"
+    visualizador.executar_json.assert_called_once()
+    assert visualizador.executar_json.call_args.kwargs == {}
+
+
 # TESTE 2 - Verifica pedidos sem informações suficientes.
 def test_pedido_ambiguo_nao_consulta_google():
     visualizador = MagicMock()

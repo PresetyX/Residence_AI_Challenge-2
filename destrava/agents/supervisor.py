@@ -66,6 +66,34 @@ def _formatar_horarios(resposta: dict) -> str:
     return "\n".join(linhas)
 
 
+def _formatar_eventos(resposta: dict) -> tuple[str, list[dict]]:
+    dados = resposta.get("dados")
+    ocupados = dados.get("ocupados") if isinstance(dados, dict) else None
+    if not isinstance(ocupados, list):
+        raise ValueError("O Visualizar não retornou uma lista válida de eventos.")
+
+    eventos = [
+        evento for evento in ocupados
+        if isinstance(evento, dict) and evento.get("tipo") in ("evento", "dia_inteiro")
+    ]
+    if not eventos:
+        return "Não encontrei eventos marcados no período consultado.", []
+
+    linhas = ["Seus eventos marcados no período:"]
+    for evento in eventos:
+        inicio = datetime.fromisoformat(evento["inicio"])
+        fim = datetime.fromisoformat(evento["fim"])
+        titulo = evento.get("titulo") or "Evento sem título"
+        if evento.get("tipo") == "dia_inteiro":
+            horario = "dia inteiro"
+        elif inicio.date() == fim.date():
+            horario = f"das {inicio:%H:%M} às {fim:%H:%M}"
+        else:
+            horario = f"{inicio:%d/%m %H:%M} até {fim:%d/%m %H:%M}"
+        linhas.append(f"- {titulo}: {inicio:%d/%m/%Y}, {horario}")
+    return "\n".join(linhas), eventos
+
+
 def _normalizar(texto: str) -> str:
     """Apenas para identificar datas/horários escritos pelo estudante."""
     letras = unicodedata.normalize("NFD", texto.casefold())
@@ -828,13 +856,27 @@ class AgenteSupervisor:
         if interpretacao.acao == "visualizar":
             try:
                 dados = interpretacao.dados
-                if not isinstance(dados, dict) or set(dados) != {"inicio", "fim"}:
+                campos_validos = {"inicio", "fim", "tipo"}
+                if (
+                    not isinstance(dados, dict)
+                    or not {"inicio", "fim"}.issubset(dados)
+                    or set(dados) - campos_validos
+                ):
                     raise ValueError("Informe início e fim.")
-                periodo = PedidoVisualizacao.model_validate(dados)
+                tipo = dados.get("tipo", "livres")
+                if tipo not in ("livres", "eventos"):
+                    raise ValueError("Escolha entre consultar horários livres ou eventos marcados.")
+                periodo = PedidoVisualizacao.model_validate(
+                    {"inicio": dados["inicio"], "fim": dados["fim"]}
+                )
             except (ValidationError, ValueError, TypeError):
                 return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": "Não consegui identificar um período válido para consulta."}
             try:
-                resposta = self.visualizador.executar_json(periodo.model_dump(mode="json"))
+                entrada = periodo.model_dump(mode="json")
+                if tipo == "eventos":
+                    resposta = self.visualizador.executar_json(entrada, incluir_ocupados=True)
+                else:
+                    resposta = self.visualizador.executar_json(entrada)
             except Exception as erro:
                 return {"status": "erro", "acao": "visualizar", "mensagem": f"Falha ao consultar a agenda: {erro}"}
             if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
@@ -842,7 +884,12 @@ class AgenteSupervisor:
                 mensagem = detalhe.get("mensagem") if isinstance(detalhe, dict) else "Falha desconhecida."
                 return {"status": "erro", "acao": "visualizar", "mensagem": f"Não foi possível consultar a agenda: {mensagem}"}
             try:
-                return {"status": "sucesso", "acao": "visualizar", "mensagem": _formatar_horarios(resposta), "dados": resposta["dados"]}
+                if tipo == "eventos":
+                    mensagem, eventos = _formatar_eventos(resposta)
+                    return {"status": "sucesso", "acao": "visualizar",
+                            "mensagem": mensagem, "dados": {"eventos": eventos}}
+                return {"status": "sucesso", "acao": "visualizar",
+                        "mensagem": _formatar_horarios(resposta), "dados": resposta["dados"]}
             except (KeyError, TypeError, ValueError) as erro:
                 return {"status": "erro", "acao": "visualizar", "mensagem": f"Resposta inesperada: {erro}"}
 
