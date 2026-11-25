@@ -71,6 +71,20 @@ class PedidoEdicao(BaseModel):
         return self
 
 
+def _move_para_o_passado(pedido: PedidoEdicao, atual: dict[str, Any]) -> bool:
+    """Novo início no passado. Manter o horário de um evento antigo continua valendo."""
+    if pedido.inicio is None or pedido.inicio > datetime.now(config.FUSO):
+        return False
+    inicio = atual.get("start", {})
+    bruto = inicio.get("dateTime") or inicio.get("date")
+    if not bruto:
+        return True
+    antes = datetime.fromisoformat(bruto.replace("Z", "+00:00"))
+    if antes.tzinfo is None:
+        antes = antes.replace(tzinfo=config.FUSO)
+    return antes != pedido.inicio
+
+
 def montar_alteracoes(pedido: PedidoEdicao) -> dict[str, Any]:
     """Corpo do PATCH do Google com só os campos enviados."""
     alteracoes: dict[str, Any] = {}
@@ -157,6 +171,8 @@ class AgenteEditar:
             atual = obter_evento(servico, pedido.id)
             if atual.get("status") == "cancelled":
                 raise LookupError("Este evento foi excluído.")
+            if _move_para_o_passado(pedido, atual):
+                raise ValueError("Não é permitido mover eventos para o passado.")
             atualizado = atualizar_evento(servico, pedido.id, alteracoes) if alteracoes else atual
         except Exception as erro:
             fluxo.meio.status = "erro"

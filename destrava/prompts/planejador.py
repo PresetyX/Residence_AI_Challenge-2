@@ -44,7 +44,8 @@ ESCOPO:
   "serviço de e-mail".
 - Não acrescente autenticação se ela não foi pedida.
 - API: planeje as operações da API, sem criar telas.
-- Página de apresentação: planeje a exibição do conteúdo, sem inventar cadastros.
+- Somente quando a ENTRADA pedir uma página de apresentação: planeje a exibição
+  do conteúdo, sem inventar cadastros. Caso contrário, não crie essa página.
 - Armazenamento local: planeje salvar e recuperar dados no próprio dispositivo.
 - Programa de terminal: mantenha a interação no terminal (menu e opções), sem telas
   gráficas e sem rotas de API.
@@ -72,9 +73,12 @@ sem repetir uma ação com palavras diferentes.
 O prazo é contexto; não declare viabilidade sem estimativas e disponibilidade.
 
 PEDIDO NÃO ENTENDIDO:
-- Só use esta saída quando a ENTRADA claramente não descrever um projeto de
-  software que você consiga dividir (texto sem sentido, cumprimento, pedido fora
-  do assunto). Se der para planejar, planeje.
+- Use esta saída quando a ENTRADA não descrever um projeto de software ou um
+  trabalho a construir: texto sem sentido, cumprimento, pergunta, pedido de
+  informação ou assunto fora disso. Exemplos que NÃO são projetos: "qual a receita
+  de bolo de cenoura?", "quem ganhou o jogo ontem?", "me conte uma piada". Nunca
+  transforme uma pergunta em um programa que a responda.
+- Se a ENTRADA descrever algo a construir, planeje.
 - Nesse caso não invente tarefas. Retorne somente {{"nao_entendi": true}}.
 """
 

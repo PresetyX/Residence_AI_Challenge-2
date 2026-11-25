@@ -23,6 +23,7 @@ Para trocar por outro banco (FAISS, Qdrant, pgvector...), basta outro
 recuperador continuam iguais.
 """
 
+import gc
 from pathlib import Path
 
 import chromadb
@@ -35,6 +36,27 @@ from langchain_core.embeddings import Embeddings
 # e cada modelo de embeddings tem a sua pasta (ver indice.py), então um nome
 # fixo basta.
 COLECAO = "trechos"
+
+
+def liberar_arquivos(pasta: Path) -> None:
+    """Encerra os bancos do Chroma abertos dentro de `pasta`.
+
+    No Windows um arquivo aberto não pode ser apagado, e o Chroma mantém um
+    "sistema" por pasta vivo até o fim do processo. Usa uma API interna do
+    chromadb: se ela mudar, a pasta antiga apenas continua sobrando.
+    """
+    try:
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        abertos = SharedSystemClient._identifier_to_system
+        alvo = pasta.resolve()
+        for identificador in list(abertos):
+            if Path(identificador).resolve().is_relative_to(alvo):
+                abertos.pop(identificador).stop()
+        # Os arquivos só são soltos quando os objetos do banco são coletados.
+        gc.collect()
+    except Exception:
+        pass
 
 
 class BancoVetorial:
