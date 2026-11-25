@@ -8,9 +8,11 @@ import unicodedata
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from destrava.agents.criar import AgenteCriar
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.criar import AgenteCriar
+from destrava.agents.planejador import PedidoNaoEntendido
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
+from destrava.core.intencao import classificar_confirmacao, consulta_agenda, pede_projeto
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
 from destrava.core.prazo import interpretar_prazo
@@ -69,6 +71,36 @@ def _normalizar(texto: str) -> str:
     return "".join(c for c in letras if unicodedata.category(c) != "Mn")
 
 
+_DIAS_DA_SEMANA = ("segunda", "terca", "quarta", "quinta", "sexta", "sabado", "domingo")
+_NOMES_DOS_DIAS = ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+                   "sexta-feira", "sábado", "domingo")
+_DIA_CITADO = re.compile(
+    r"(?:\b(?:na|no|nesta|neste|nessa|nesse|esta|este|essa|esse|proxima|proximo|para|pra|ate|de|da|do)\s+"
+    r"(?:(?:proxima|proximo)\s+)?(segunda|terca|quarta|quinta|sexta|sabado|domingo)(?:[- ]feira)?"
+    r"|\b(segunda|terca|quarta|quinta|sexta)[- ]feira"
+    r"|\b(sexta|sabado|domingo))\b"
+    # "a sexta reunião", "na segunda semana": ordinal, não é dia.
+    r"(?!\s+(?:semana|reuniao|parte|etapa|vez|fase|aula|edicao|rodada|opcao|sessao)\b)"
+)
+
+
+def _data_do_dia_da_semana(texto: str, hoje: date) -> date | None:
+    """Data do único dia da semana citado ("na sexta"); None se não der para saber.
+
+    O próprio dia de hoje só vale com "que vem"/"próxima" (semana seguinte):
+    sem isso é ambíguo, e o pedido continua exigindo a data.
+    """
+    dias = {next(g for g in achado.groups() if g) for achado in _DIA_CITADO.finditer(texto)}
+    if len(dias) != 1:
+        return None
+    distancia = (_DIAS_DA_SEMANA.index(dias.pop()) - hoje.weekday()) % 7
+    if distancia == 0:
+        if not re.search(r"\b(que vem|proxim[oa])\b", texto):
+            return None
+        distancia = 7
+    return hoje + timedelta(days=distancia)
+
+
 def _data_do_pedido(texto: str, agora: datetime) -> tuple[date | None, str | None]:
     """Valida datas explícitas antes que a LLM possa alterá-las."""
     texto = _normalizar(texto)
@@ -86,6 +118,26 @@ def _data_do_pedido(texto: str, agora: datetime) -> tuple[date | None, str | Non
             except ValueError:
                 return None, f"A data {achado.group()} não existe. Informe uma data válida."
 
+    # dd/mm sem ano: a próxima vez que a data acontece. Sem "dia/em/no/para", o mês
+    # precisa de dois dígitos (para "1/2 hora" ou "24/7" não virarem datas).
+    sem_ano = (
+        r"(?<![\d/])(\d{1,2})/(\d{2})(?![\d/])"
+        r"|\b(?:dia|em|no|para|pra|data)\s+(\d{1,2})/(\d{1,2})(?![\d/])"
+    )
+    for achado in re.finditer(sem_ano, texto):
+        dia, mes = (int(p) for p in achado.groups() if p)
+        candidata = None
+        for ano in (agora.year, agora.year + 1):
+            try:
+                candidata = date(ano, mes, dia)
+            except ValueError:
+                continue
+            if candidata >= agora.date():
+                break
+        if candidata is None:
+            return None, f"A data {dia:02d}/{mes:02d} não existe. Informe uma data válida."
+        datas.append(candidata)
+
     if re.search(r"\bdepois de amanha\b", texto):
         datas.append(agora.date() + timedelta(days=2))
         texto = re.sub(r"\bdepois de amanha\b", "", texto)
@@ -93,6 +145,11 @@ def _data_do_pedido(texto: str, agora: datetime) -> tuple[date | None, str | Non
         datas.append(agora.date() + timedelta(days=1))
     if re.search(r"\bhoje\b", texto):
         datas.append(agora.date())
+
+    if not datas:
+        do_dia_da_semana = _data_do_dia_da_semana(texto, agora.date())
+        if do_dia_da_semana:
+            datas.append(do_dia_da_semana)
 
     if len(set(datas)) > 1:
         return None, "Foram informadas datas diferentes. Envie um novo pedido completo."
@@ -126,7 +183,11 @@ def _horarios_do_pedido(texto: str) -> tuple[tuple[time, time] | None, str | Non
         if periodo in ("tarde", "noite"):
             if periodo == "noite" and any(h <= 5 for h in horas):
                 return None, "O horário da noite ficou ambíguo. Informe em formato 24h."
+            inicio_dito = horas[0]
             horas = [h + 12 if 1 <= h <= 11 else h for h in horas]
+            # "das 11h às 1 da tarde": o "da tarde" é do fim; o início é de manhã.
+            if periodo == "tarde" and 6 <= inicio_dito <= 11 and horas[0] > horas[1]:
+                horas[0] = inicio_dito
         elif periodo in ("manha", "madrugada") and (any(h > 12 for h in horas) or (periodo == "manha" and 12 in horas)):
             return None, "O período informado não combina com o horário. Use formato 24h."
         encontrados.append((time(horas[0], minutos[0]), time(horas[1], minutos[1])))
@@ -159,6 +220,48 @@ def _conferir_texto(pedido: str, inicio: datetime, fim: datetime, agora: datetim
                 f"mas você informou {h1:%H:%M} às {h2:%H:%M}. "
                 "Nenhum evento foi criado. Envie um novo pedido completo.")
     return None
+
+
+def _calendario_para_o_prompt(agora: datetime) -> str:
+    """Data atual e as datas relativas já calculadas (o LLM erra essa conta)."""
+    hoje = agora.date()
+    relativas = (f"hoje = {hoje.isoformat()}; amanhã = {(hoje + timedelta(days=1)).isoformat()}; "
+                 f"depois de amanhã = {(hoje + timedelta(days=2)).isoformat()}")
+    proximos = []
+    for n in range(1, 8):
+        dia = agora.date() + timedelta(days=n)
+        proximos.append(f"{_NOMES_DOS_DIAS[dia.weekday()]} = {dia.isoformat()}")
+    return (f"{agora.isoformat(timespec='seconds')} ({_NOMES_DOS_DIAS[agora.weekday()]})\n"
+            f"{relativas}\n"
+            f"Próximos dias: {'; '.join(proximos)}")
+
+
+# Palavras que indicam um período maior que o dia citado.
+_FALA_DE_INTERVALO = r"\b(semanas?|mes|meses|dias|entre|ate|proximos|proximas|a partir)\b"
+
+
+def _consulta_do_dia(pedido: str, agora: datetime) -> dict | None:
+    """Período do dia inteiro quando o texto cita exatamente um dia."""
+    data, erro = _data_do_pedido(pedido, agora)
+    if erro or data is None or re.search(_FALA_DE_INTERVALO, _normalizar(pedido)):
+        return None
+    inicio = datetime.combine(data, time.min, tzinfo=config.FUSO)
+    return {"inicio": inicio.isoformat(), "fim": (inicio + timedelta(days=1)).isoformat()}
+
+
+def _ajustar_data_da_consulta(
+    pedido: str, periodo: PedidoVisualizacao, agora: datetime
+) -> PedidoVisualizacao:
+    """Se o texto cita UM dia e a LLM consultou outro, vale o dia do texto."""
+    data, erro = _data_do_pedido(pedido, agora)
+    if erro or data is None or re.search(_FALA_DE_INTERVALO, _normalizar(pedido)):
+        return periodo
+    if periodo.inicio.date() == data:
+        return periodo
+    deslocamento = data - periodo.inicio.date()
+    return PedidoVisualizacao(
+        inicio=periodo.inicio + deslocamento, fim=periodo.fim + deslocamento
+    )
 
 
 def _horario_acordado(inicio: datetime, fim: datetime) -> bool:
@@ -495,8 +598,31 @@ class AgenteSupervisor:
             fim = datetime.fromisoformat(evento["fim"])
             if inicio >= fim or not _horario_acordado(inicio, fim):
                 return False
+            # O Visualizar filtra janelas menores que DURACAO_MINIMA_LIVRE.
+            # Para uma parte curta, confira os ocupados do intervalo exato,
+            # sem alterar a configuração de visualização nem forçar um gap.
+            if fim - inicio < config.DURACAO_MINIMA_LIVRE:
+                resposta = self.visualizador.executar_json(
+                    {"inicio": evento["inicio"], "fim": evento["fim"]},
+                    incluir_ocupados=True,
+                )
+                if resposta.get("status") != "sucesso":
+                    return False
+                ocupados = resposta["dados"]["ocupados"]
+                if not isinstance(ocupados, list):
+                    return False
+                for bloco in ocupados:
+                    if bloco["tipo"] == "dia_inteiro" and not config.DIA_INTEIRO_BLOQUEIA:
+                        continue
+                    a = datetime.fromisoformat(bloco["inicio"])
+                    b = datetime.fromisoformat(bloco["fim"])
+                    if a < fim and b > inicio:
+                        return False
+                return True
             resposta = self.visualizador.executar_json({
-                "inicio": evento["inicio"], "fim": evento["fim"]
+                "inicio": evento["inicio"], "fim": evento["fim"],
+                # Aqui qualquer lacuna conta: um evento de 15 min também cabe.
+                "duracao_minima_minutos": 0,
             })
             if resposta.get("status") != "sucesso":
                 return False
@@ -518,10 +644,11 @@ class AgenteSupervisor:
 
         # A única mensagem contextual é 'sim'/'não' para um evento já confirmado na prévia.
         if self.evento_pendente is not None:
-            if _normalizar(pedido) in ("nao", "cancelar"):
+            confirmacao = classificar_confirmacao(pedido)
+            if confirmacao is False:
                 self.evento_pendente = None
                 return {"status": "cancelado", "acao": "criar", "mensagem": "Criação cancelada. Nenhum evento foi criado."}
-            if _normalizar(pedido) == "sim":
+            if confirmacao is True:
                 evento = self.evento_pendente
                 self.evento_pendente = None
                 self.cronograma_pendente = None
@@ -547,6 +674,10 @@ class AgenteSupervisor:
                     return {"status": "erro", "acao": "criar", "mensagem": "O Google confirmou a criação, mas não devolveu os dados. Confira sua agenda antes de tentar novamente."}
             return {"status": "confirmacao", "acao": "criar", "mensagem": "Responda 'sim' para criar o evento ou 'não' para cancelar."}
 
+        # Pedido de projeto não depende da LLM (e pode citar "agenda" ou "marcar").
+        if pede_projeto(pedido):
+            return self._indisponivel("planejar")
+
         agora_dt = datetime.now(config.FUSO)
         # A verificação de data inexistente acontece ANTES da Gemma.
         _, erro_data = _data_do_pedido(pedido, agora_dt)
@@ -555,7 +686,9 @@ class AgenteSupervisor:
 
         # Para criação explicitamente solicitada, exige tudo na mesma mensagem.
         texto_normalizado = _normalizar(pedido)
-        quer_criar = re.search(r"\b(crie|criar|cria|agende|agendar|marque|marcar)\b", texto_normalizado)
+        quer_criar = not consulta_agenda(pedido) and re.search(
+            r"\b(crie|criar|cria|agende|agendar|marque|marcar)\b", texto_normalizado
+        )
         if quer_criar:
             data, _ = _data_do_pedido(pedido, agora_dt)
             intervalo, erro_horario = _horarios_do_pedido(pedido)
@@ -567,16 +700,26 @@ class AgenteSupervisor:
 
         try:
             prompt = PROMPT_SUPERVISOR.format(
-                agora=agora_dt.isoformat(timespec="seconds"), pedido=pedido
+                agora=_calendario_para_o_prompt(agora_dt), pedido=pedido
             )
             texto_llm = self.consultar_llm(prompt)
             interpretacao = InterpretacaoSupervisor.model_validate(extrair_json(texto_llm))
         except (ErroLLM, ValueError, ValidationError, TypeError) as erro:
             return {"status": "erro", "acao": "interpretar", "mensagem": f"Não consegui interpretar o pedido: {erro}"}
 
+        # Consulta de um dia citado no texto não precisa de horário: se a LLM
+        # pediu mais dados, consulta o dia inteiro.
+        if interpretacao.acao == "esclarecer" and consulta_agenda(pedido):
+            dia_inteiro = _consulta_do_dia(pedido, agora_dt)
+            if dia_inteiro:
+                interpretacao = InterpretacaoSupervisor(acao="visualizar", dados=dia_inteiro)
+
         if interpretacao.acao == "esclarecer":
-            return {"status": "esclarecimento", "acao": "esclarecer",
-                    "mensagem": (interpretacao.pergunta or "Informações insuficientes.") + " Envie um novo pedido completo."}
+            mensagem = (interpretacao.pergunta or "Informações insuficientes.").strip()
+            # A LLM às vezes já pede o novo pedido: não repetir.
+            if "novo pedido" not in _normalizar(mensagem):
+                mensagem += " Envie um novo pedido completo."
+            return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": mensagem}
 
         if interpretacao.acao == "visualizar":
             try:
@@ -584,6 +727,7 @@ class AgenteSupervisor:
                 if not isinstance(dados, dict) or set(dados) != {"inicio", "fim"}:
                     raise ValueError("Informe início e fim.")
                 periodo = PedidoVisualizacao.model_validate(dados)
+                periodo = _ajustar_data_da_consulta(pedido, periodo, agora_dt)
             except (ValidationError, ValueError, TypeError):
                 return {"status": "esclarecimento", "acao": "esclarecer", "mensagem": "Não consegui identificar um período válido para consulta."}
             try:
@@ -632,9 +776,13 @@ class AgenteSupervisor:
                                  f"no dia {inicio:%d/%m/%Y}, das {inicio:%H:%M} às {fim:%H:%M}? "
                                  "Responda 'sim' ou 'não'.")}
 
+        return self._indisponivel(interpretacao.acao)
+
+    @staticmethod
+    def _indisponivel(acao: str) -> dict:
         mensagens = {
             "planejar": "O Planejador ainda não foi integrado ao fluxo por texto do Supervisor.",
             "fora_escopo": "Posso ajudar a consultar a agenda ou criar eventos.",
         }
-        return {"status": "indisponivel", "acao": interpretacao.acao,
-                "mensagem": mensagens.get(interpretacao.acao, "Essa funcionalidade ainda não está disponível.")}
+        return {"status": "indisponivel", "acao": acao,
+                "mensagem": mensagens.get(acao, "Essa funcionalidade ainda não está disponível.")}

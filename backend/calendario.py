@@ -34,9 +34,9 @@ from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
 from backend import perfil
-from destrava.agents.criar import AgenteCriar
-from destrava.agents.editar import AgenteEditar, evento_resumido
-from destrava.agents.excluir import AgenteExcluir
+from destrava.tools.criar import AgenteCriar
+from destrava.tools.editar import AgenteEditar, evento_resumido
+from destrava.tools.excluir import AgenteExcluir
 from destrava.core import config
 from destrava.core.google_client import get_service, listar_eventos, obter_evento
 from destrava.core.models import ErroInfo, Etapa, Fluxo, RespostaAgente

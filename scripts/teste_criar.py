@@ -8,7 +8,7 @@ Uso:
 
 from unittest.mock import MagicMock
 
-from destrava.agents.criar import criar_evento_google
+from destrava.tools.criar import criar_evento_google
 
 
 def main():

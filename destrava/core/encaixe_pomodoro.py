@@ -64,6 +64,33 @@ def _janelas_acordadas(livres: list[dict], agora: datetime) -> list[list[datetim
     return unidas
 
 
+def _descricao_planejamento(tarefa: dict, minutos_trabalho: int) -> str:
+    """Monta a parte descritiva do evento com dados reais do Planejador.
+
+    Campos opcionais ausentes nao sao inventados. A estimativa vem do
+    calculo efetivamente usado pelo encaixe (story points x 60, ou padrao).
+    """
+    titulo = tarefa["titulo"].strip()
+    etapa = tarefa.get("etapa")
+    if isinstance(etapa, int) and not isinstance(etapa, bool) and etapa >= 0:
+        linhas = [f"Etapa {etapa} — {titulo}"]
+    else:
+        linhas = [f"Tarefa: {titulo}"]
+
+    campos = (
+        ("objetivo", "Objetivo"),
+        ("entregaveis", "Entregáveis"),
+        ("demonstracao", "Demonstração"),
+    )
+    for chave, rotulo in campos:
+        valor = tarefa.get(chave)
+        if isinstance(valor, str) and valor.strip():
+            linhas.append(f"{rotulo}: {valor.strip()}")
+
+    linhas.append(f"Trabalho estimado: {minutos_trabalho} minutos.")
+    return "\n".join(linhas)
+
+
 def _descricao_pomodoro(sessoes: list[dict], minutos_trabalho: int) -> str:
     pausa = sum(s["duracao_minutos"] for s in sessoes if s["tipo"] != "foco")
     linhas = [
@@ -79,6 +106,37 @@ def _descricao_pomodoro(sessoes: list[dict], minutos_trabalho: int) -> str:
     return "\n".join(linhas)
 
 
+def _maior_trabalho_que_cabe(
+    inicio: datetime,
+    limite: datetime,
+    trabalho_restante: int,
+    usar_pomodoro: bool,
+) -> int:
+    """Maior quantidade de foco que cabe até `limite`, incluindo as pausas.
+
+    Reutiliza o Pomodoro original, sem alterar os ciclos. A busca binária
+    encontra a quantidade máxima de foco, em minutos inteiros.
+    """
+    minutos_calendario = int((limite - inicio).total_seconds() // 60)
+    if minutos_calendario <= 0:
+        return 0
+    if not usar_pomodoro:
+        return min(trabalho_restante, minutos_calendario)
+
+    menor, maior = 1, min(trabalho_restante, minutos_calendario)
+    resposta = 0
+    while menor <= maior:
+        meio = (menor + maior) // 2
+        sessoes = gerar_sessoes_pomodoro(inicio, meio)
+        fim = datetime.fromisoformat(sessoes[-1]["fim"])
+        if fim <= limite:
+            resposta = meio
+            menor = meio + 1
+        else:
+            maior = meio - 1
+    return resposta
+
+
 def encaixar_tarefas_pomodoro(
     tarefas: list[dict],
     livres: list[dict],
@@ -86,15 +144,15 @@ def encaixar_tarefas_pomodoro(
     agora: datetime | None = None,
     usar_pomodoro: bool = True,
 ) -> tuple[list[dict], list[dict]]:
-    """Encaixa TODAS as tarefas ou dispara SemEspacoPomodoro.
+    """Distribui as etapas sequencialmente em uma ou várias janelas livres.
 
-    O trabalho de cada tarefa e story_points x MINUTOS_POR_STORY_POINT
-    (60 min, pomodoro.py); sem story points, 60 min. Com Pomodoro, a tarefa
-    ocupa esse trabalho + as pausas. Sem Pomodoro, apenas o trabalho.
-    Ambos os modos preservam MINIMO_LIVRE_DIA, respeitam os compromissos
-    e permitem tarefas consecutivas, sem gap obrigatorio.
+    Cada etapa pode virar vários eventos (até em dias diferentes). O Pomodoro
+    é gerado novamente para cada parte. O tempo de pausa integra a duração
+    ocupada no calendário, e 2h por dia permanecem disponíveis ao estudante.
+    Não há intervalo obrigatório entre etapas.
 
-    Nenhum evento e criado aqui: esta funcao apenas prepara uma previa.
+    Sem efeitos colaterais: se uma etapa não couber até o prazo, lança
+    SemEspacoPomodoro e não devolve um cronograma parcial ao Supervisor.
     """
     if not tarefas:
         raise ValueError("Nenhuma tarefa recebida.")
@@ -107,68 +165,99 @@ def encaixar_tarefas_pomodoro(
     tempo_livre_por_dia = defaultdict(timedelta)
     for a, b in janelas:
         tempo_livre_por_dia[a.date()] += b - a
-
     tempo_agendado_por_dia = defaultdict(timedelta)
     reserva = config.MINIMO_LIVRE_DIA
-    janelas = [janela for janela in janelas
-               if tempo_livre_por_dia[janela[0].date()] > reserva]
-    fim_ultimo_evento_por_dia: dict = {}
-    eventos, detalhes = [], []
+    janelas = [janela for janela in janelas if tempo_livre_por_dia[janela[0].date()] > reserva]
+
+    # Uma única referência global impede inverter as etapas entre dias.
+    ultimo_fim: datetime | None = None
+    eventos: list[dict] = []
+    detalhes: list[dict] = []
 
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
         story_points = tarefa.get("story_points")
         if not isinstance(story_points, int):
             story_points = 0
-        # Story points da rede neural x MINUTOS_POR_STORY_POINT (pomodoro.py).
-        trabalho = minutos_de_trabalho(tarefa)
+        trabalho_total = minutos_de_trabalho(tarefa)
+        trabalho_restante = trabalho_total
+        partes: list[dict] = []
+
+        # Cada etapa usa uma janela no máximo uma vez. Não reiniciamos
+        # artificialmente o Pomodoro no mesmo intervalo para eliminar pausas.
         for janela in janelas:
+            if trabalho_restante == 0:
+                break
             dia = janela[0].date()
-            inicio = max(janela[0], agora)
-            anterior = fim_ultimo_evento_por_dia.get(dia)
-            if anterior is not None:
-                inicio = max(inicio, anterior)
-            inicio = _proximo_minuto(inicio)
+            inicio = _proximo_minuto(max(janela[0], agora, ultimo_fim or agora))
+            saldo_utilizavel = (tempo_livre_por_dia[dia]
+                                - tempo_agendado_por_dia[dia] - reserva)
+            limite = min(janela[1], inicio + saldo_utilizavel)
+            foco = _maior_trabalho_que_cabe(
+                inicio, limite, trabalho_restante, usar_pomodoro,
+            )
+            if foco <= 0:
+                continue
 
             if usar_pomodoro:
-                sessoes = gerar_sessoes_pomodoro(inicio, trabalho)
+                sessoes = gerar_sessoes_pomodoro(inicio, foco)
                 fim = datetime.fromisoformat(sessoes[-1]["fim"])
-                titulo = f"[Destrava] {titulo_tarefa} (Pomodoro)"
-                descricao = _descricao_pomodoro(sessoes, trabalho)
             else:
                 sessoes = []
-                fim = inicio + timedelta(minutes=trabalho)
-                titulo = f"[Destrava] {titulo_tarefa}"
-                descricao = ("Destrava - Prazo corrido (sem tecnica Pomodoro)\\n"
-                             f"Trabalho estimado: {trabalho} minutos. "
-                             "Sem pausas Pomodoro programadas.")
+                fim = inicio + timedelta(minutes=foco)
 
-            duracao_total = fim - inicio
-            saldo_apos = (tempo_livre_por_dia[dia] -
-                          tempo_agendado_por_dia[dia] - duracao_total)
-            if fim <= janela[1] and saldo_apos >= reserva:
-                eventos.append({
-                    "titulo": titulo,
-                    "inicio": inicio.isoformat(),
-                    "fim": fim.isoformat(),
-                    "descricao": descricao,
-                    "story_points": story_points,
-                })
-                if usar_pomodoro:
-                    detalhes.append({"titulo": titulo, "sessoes": sessoes})
-                fim_ultimo_evento_por_dia[dia] = fim
-                tempo_agendado_por_dia[dia] += duracao_total
-                janela[0] = fim
-                break
-        else:
+            trabalho_restante -= foco
+            partes.append({
+                "inicio": inicio, "fim": fim,
+                "foco": foco, "restante": trabalho_restante,
+                "sessoes": sessoes,
+            })
+            tempo_agendado_por_dia[dia] += fim - inicio
+            janela[0] = fim
+            ultimo_fim = fim
+
+        if trabalho_restante > 0:
             modo = "com Pomodoro" if usar_pomodoro else "sem Pomodoro"
             raise SemEspacoPomodoro(
                 f"Nao ha horario suficiente para '{titulo_tarefa}' {modo}, "
                 f"mantendo {int(reserva.total_seconds() / 60)} minutos "
                 "livres por dia. Nenhum evento foi criado."
             )
-    return eventos, detalhes
 
+        # Sabemos a quantidade de partes apenas depois de terminar a etapa.
+        qtd_partes = len(partes)
+        for numero, parte in enumerate(partes, start=1):
+            sufixo_parte = f" - Parte {numero}/{qtd_partes}" if qtd_partes > 1 else ""
+            titulo = f"[Destrava] {titulo_tarefa}{sufixo_parte}"
+            if usar_pomodoro:
+                titulo += " (Pomodoro)"
+            descricao = _descricao_planejamento(tarefa, trabalho_total)
+            if qtd_partes > 1:
+                descricao += (
+                    f"\nParte {numero}/{qtd_partes}: {parte['foco']} minutos de trabalho nesta parte."
+                    f"\nRestante da etapa após esta parte: {parte['restante']} minutos."
+                )
+            if usar_pomodoro:
+                descricao += (
+                    "\n\nTécnica Pomodoro: ciclos de até 25 minutos de foco com pausas.\n"
+                    + _descricao_pomodoro(parte["sessoes"], parte["foco"])
+                )
+            else:
+                descricao += (
+                    "\n\nDestrava - Prazo corrido (sem tecnica Pomodoro)\n"
+                    "Técnica Pomodoro: não utilizada. Sem pausas Pomodoro programadas."
+                )
+            eventos.append({
+                "titulo": titulo,
+                "inicio": parte["inicio"].isoformat(),
+                "fim": parte["fim"].isoformat(),
+                "descricao": descricao,
+                "story_points": story_points,
+            })
+            if usar_pomodoro:
+                detalhes.append({"titulo": titulo, "sessoes": parte["sessoes"]})
+
+    return eventos, detalhes
 
 def calcular_deficit_minimo(
     tarefas: list[dict],

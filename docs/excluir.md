@@ -10,7 +10,7 @@ Por enquanto o Supervisor não chama este agente: pedidos de exclusão no chat v
 
 ## Contrato
 
-Arquivo `destrava/agents/excluir.py`.
+Arquivo `destrava/tools/excluir.py`.
 
 | Função ou método | Entrada | Saída |
 |---|---|---|

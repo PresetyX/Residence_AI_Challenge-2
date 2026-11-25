@@ -9,7 +9,7 @@ Consultar a agenda do usuário no Google Agenda e informar, para o período pedi
 
 ## Contrato
 
-Classe `AgenteVisualizar` em `destrava/agents/visualizar.py`.
+Classe `AgenteVisualizar` em `destrava/tools/visualizar.py`.
 
 | Método | Entrada | Saída | Uso |
 |---|---|---|---|

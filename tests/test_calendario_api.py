@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from googleapiclient.errors import HttpError
 
 import backend.calendario as calendario
-import destrava.agents.criar as criar
+import destrava.tools.criar as criar
 from destrava.core import config
 
 

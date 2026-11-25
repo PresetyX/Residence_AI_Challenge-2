@@ -209,6 +209,7 @@ def criar_chat(formato: dict | None = None, modelo: str | None = None) -> ChatOl
         base_url=base_url,
         client_kwargs=_client_kwargs(timeout),
         format=formato,
+        temperature=config.TEMPERATURA_LLM,
         # Explícito porque o padrão do Ollama (~4096 tokens) pode cortar o
         # prompt do Planejador (regras + trechos do RAG) sem avisar.
         num_ctx=_ler_num_ctx(),

@@ -11,12 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 from backend.calendario import router as calendario_router
-from backend.chat import router as chat_router
+from backend.chat import modelo_ollama, router as chat_router
 from backend import perfil
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
 from destrava.agents.supervisor import AgenteSupervisor
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
@@ -136,6 +136,8 @@ class ProjetoRequest(BaseModel):
     # "tenho uma semana", "20/12"...). Sem prazo nenhum, o plano sai assim mesmo
     # e a resposta traz precisa_prazo=True.
     prazo: str | None = None
+    # Id do seletor de modelo do chat. Sem ele, o Planejador usa config.MODELO.
+    modelo: str | None = None
 
     @field_validator("texto")
     @classmethod
@@ -272,7 +274,8 @@ def criar_projeto(
     print("Planejando projeto: ", projeto.texto, "com prazo", prazo or "(não informado)", "...")
     planejador: AgentePlanejador = request.app.state.planejador
     try:
-        plano = planejador.executar(projeto.texto, prazo_planejamento)
+        opcoes = {"modelo": modelo_ollama(projeto.modelo)} if projeto.modelo else {}
+        plano = planejador.executar(projeto.texto, prazo_planejamento, **opcoes)
     except PedidoNaoEntendido as erro:
         # A IA não entendeu o projeto: o frontend mostra a pergunta e espera
         # mais detalhes (mesmo prazo).

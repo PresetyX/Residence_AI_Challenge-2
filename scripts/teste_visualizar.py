@@ -25,7 +25,7 @@ import json
 
 from datetime import date, datetime, timedelta
 
-from destrava.agents.visualizar import AgenteVisualizar
+from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 
 

@@ -8,7 +8,7 @@ Contrato: recebe um JSON com o período ("inicio" e "fim") e devolve um JSON
 com status, acao, periodo, dados, fluxo e erro. Não usa LLM.
 """
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from pydantic import ValidationError
 
@@ -119,7 +119,10 @@ class AgenteVisualizar:
 
         # 3. MEIO + FIM: busca no Google e calcula
         try:
-            resultado = self.executar(inicio, fim)
+            opcoes = {}
+            if pedido.duracao_minima_minutos is not None:
+                opcoes["duracao_minima"] = timedelta(minutes=pedido.duracao_minima_minutos)
+            resultado = self.executar(inicio, fim, **opcoes)
         except Exception as erro:
             fluxo.meio.status = "erro"
             return RespostaAgente(
@@ -146,7 +149,9 @@ class AgenteVisualizar:
             fluxo=fluxo,
         ).model_dump(mode="json")
 
-    def executar(self, inicio: datetime, fim: datetime) -> dict:
+    def executar(
+        self, inicio: datetime, fim: datetime, duracao_minima: timedelta | None = None
+    ) -> dict:
         """Busca os eventos do período e devolve a visualização.
 
         Args:
@@ -184,7 +189,9 @@ class AgenteVisualizar:
         ]
 
         # 4. Calcula ocupados, livres e conflitos (core/agenda_engine.py).
-        visualizacao = montar_visualizacao(eventos=eventos, inicio=inicio, fim=fim)
+        visualizacao = montar_visualizacao(
+            eventos=eventos, inicio=inicio, fim=fim, duracao_minima=duracao_minima
+        )
 
         # 5. Devolve como dicionário, com as datas em texto ISO.
         return visualizacao.model_dump(mode="json")
