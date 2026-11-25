@@ -124,7 +124,7 @@ export const inferenceService: InferenceService = {
       return;
     }
     if (last && routeToProjectPlanner(last.content)) {
-      yield* projectPlannerStream(last.content, signal);
+      yield* projectPlannerStream(last.content, request.modelId, signal);
       return;
     }
     yield* supervisor.streamChat(request, signal);

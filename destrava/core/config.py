@@ -76,6 +76,10 @@ TIMEOUT_LLM = _numero_do_ambiente("TIMEOUT_LLM", 300)
 # (~4096) pode cortar o prompt do Planejador (regras + trechos do RAG).
 NUM_CTX = int(_numero_do_ambiente("NUM_CTX", 8192))
 
+# Temperatura das respostas. 0: o mesmo pedido tende à mesma resposta, o que
+# importa porque os agentes esperam um JSON fiel ao pedido.
+TEMPERATURA_LLM = float(_texto_do_ambiente("TEMPERATURA_LLM", "0"))
+
 # SERVIDOR DE IA (opcional)
 # Endereço do serviço de story points (BGE-M3 + rede neural) no PC com a GPU,
 # ex.: http://<ip-tailscale>:8001. Vazio: o backend carrega o modelo localmente

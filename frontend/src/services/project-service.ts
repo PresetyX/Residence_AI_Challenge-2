@@ -8,7 +8,7 @@
  *   POST /projetos/agendar    -> deadline class + calendar preview (nothing created yet).
  *   POST /projetos/agendar/confirmar -> creates the previewed events.
  */
-import type { ProjectPlan, ProjectTask } from "@/lib/types";
+import type { ModelId, ProjectPlan, ProjectTask } from "@/lib/types";
 import type { EventDto } from "./contracts";
 import { ApiError, request } from "./http";
 
@@ -72,10 +72,19 @@ export interface PlannedProject {
 
 export const projectService = {
   /** `deadline` (YYYY-MM-DD) is optional: without it the backend reads it from the text. */
-  async planProject(description: string, deadline: string | null, signal?: AbortSignal): Promise<PlannedProject> {
+  async planProject(
+    description: string,
+    deadline: string | null,
+    modelId: ModelId,
+    signal?: AbortSignal,
+  ): Promise<PlannedProject> {
     const dto = await request<ProjectPlanDto>("/projetos", {
       method: "POST",
-      body: JSON.stringify(deadline ? { texto: description, prazo: deadline } : { texto: description }),
+      body: JSON.stringify({
+        texto: description,
+        modelo: modelId,
+        ...(deadline ? { prazo: deadline } : {}),
+      }),
       signal,
     });
 

@@ -9,7 +9,14 @@
  * Everything else (free slots, single events) stays with the Supervisor chat stream.
  */
 import { formatLongDate, formatShortDate, formatTimeRange } from "@/lib/format";
-import type { ProjectPlan } from "@/lib/types";
+import {
+  classifyConfirmation,
+  isCalendarRequest,
+  isProjectRequest,
+  looksLikeReply,
+  normalizeText as normalize,
+} from "@/lib/intent";
+import type { ModelId, ProjectPlan } from "@/lib/types";
 import { toCalendarEvent } from "./contracts";
 import { ApiError } from "./http";
 import type { InferenceChunk } from "./inference-service";
@@ -40,15 +47,6 @@ export function expectProjectDescription(): void {
   awaitingDetails = { description: "", deadline: null };
 }
 
-const normalize = (text: string) =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "");
-
-const YES = /^(sim|s|pode|ok|okay|bora|claro|quero|confirmo|confirma|confirmar|isso|manda|vai|agend\w*|encaix\w*)\b/;
-const NO = /^(nao|n|cancela\w*|deixa|agora nao|melhor nao)\b/;
-
 const PROJECT =
   /\b(projeto|app|aplicativo|sistema|site|plataforma|api|software|produto|startup|mvp|jogo|game|dashboard|chatbot|bot|plano|planej\w*|planeje|tcc|monografia)\b|\b(quero|preciso|vou|gostaria de|pretendo)\s+(criar|desenvolver|construir|fazer|montar|lancar|entregar|programar|implementar)\b/;
 /** Single appointments belong to the Supervisor ("crie uma reunião amanhã das 13h às 14h"). */
@@ -59,25 +57,28 @@ const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*)\b/;
 /** Decides who answers this message: the planner flow (true) or the Supervisor stream. */
 export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
-  const answer = t.trim();
 
-  // A plan or a calendar preview is waiting for a yes/no: that answer is ours.
-  if (awaitingConfirm) {
-    if (YES.test(answer) || NO.test(answer)) return true;
+  // A plan or a calendar preview is waiting for a yes/no: that answer is ours,
+  // even when unclear (projectPlannerStream asks again). Anything else drops it.
+  if (awaitingConfirm || pendingSchedule) {
+    const reply = classifyConfirmation(text) !== null || looksLikeReply(text);
+    if (reply && !isProjectRequest(text)) return true;
+    if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
     awaitingConfirm = false;
-    void scheduleService.confirm(false).catch(() => undefined);
-  }
-  if (pendingSchedule) {
-    if (YES.test(answer) || NO.test(answer)) return true;
     pendingSchedule = null;
   }
 
-  if (SINGLE_ITEM.test(t) || CALENDAR.test(t)) {
+  // A project that mentions "agenda" or "consulta" is still a project.
+  if (isProjectRequest(text)) return true;
+
+  // Details of a project may talk about calendars; only a clear calendar request leaves.
+  const calendar = awaitingDetails ? isCalendarRequest(text) : SINGLE_ITEM.test(t) || CALENDAR.test(t);
+  if (calendar) {
     pendingProject = null;
     awaitingDetails = null;
     return false;
   }
-  if (pendingProject || awaitingDetails) return !NO.test(answer);
+  if (pendingProject || awaitingDetails) return classifyConfirmation(text) !== false;
   return PROJECT.test(t);
 }
 
@@ -125,18 +126,28 @@ function isDeadlineError(error: unknown): error is ApiError {
 
 export async function* projectPlannerStream(
   text: string,
+  modelId: ModelId,
   signal?: AbortSignal,
 ): AsyncGenerator<InferenceChunk> {
-  const answer = normalize(text).trim();
   if (awaitingConfirm) {
+    const verdict = classifyConfirmation(text);
+    if (verdict === null) {
+      yield { type: "token", value: "Não entendi. Responda **sim** para criar os eventos ou **não** para cancelar." };
+      return;
+    }
     awaitingConfirm = false;
-    yield* confirmSchedule(YES.test(answer), signal);
+    yield* confirmSchedule(verdict, signal);
     return;
   }
   if (pendingSchedule) {
+    const verdict = classifyConfirmation(text);
+    if (verdict === null) {
+      yield { type: "token", value: "Não entendi. Responda **sim** para encaixar as etapas na agenda ou **não** para deixar como está." };
+      return;
+    }
     const pending = pendingSchedule;
     pendingSchedule = null;
-    if (NO.test(answer)) {
+    if (!verdict) {
       yield { type: "token", value: "Tudo bem, não mexi na sua agenda. O plano continua aqui no cartão." };
       yield { type: "conversation_end" };
       return;
@@ -176,7 +187,7 @@ export async function* projectPlannerStream(
   };
   let planned;
   try {
-    planned = await projectService.planProject(description, details?.deadline ?? null, signal);
+    planned = await projectService.planProject(description, details?.deadline ?? null, modelId, signal);
   } catch (error) {
     if (error instanceof ApiError && error.kind === NOT_UNDERSTOOD) {
       awaitingDetails = { description, deadline: details?.deadline ?? null };

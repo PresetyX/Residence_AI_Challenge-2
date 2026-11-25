@@ -51,7 +51,7 @@ from sqlalchemy.engine import URL
 
 from destrava.core import config
 from destrava.core.llm_client import ErroLLM, criar_embeddings
-from destrava.rag.banco_vetorial import BancoVetorial
+from destrava.rag.banco_vetorial import BancoVetorial, liberar_arquivos
 from destrava.rag.chunker import Trecho, dividir_texto
 
 
@@ -219,6 +219,7 @@ def _sincronizar_banco(
     if pasta_base.is_dir():
         for outra in pasta_base.iterdir():
             if outra.is_dir() and outra.name != assinatura:
+                liberar_arquivos(outra)
                 shutil.rmtree(outra, ignore_errors=True)
 
     banco = BancoVetorial(pasta / "chroma", embeddings)
@@ -246,6 +247,8 @@ def _sincronizar_banco(
         # funciona, mas emite um aviso de segurança a cada execução.
         key_encoder="sha256",
     )
+    # Fecha o SQLite do registro: aberto, ele impede apagar a pasta no Windows.
+    registro.engine.dispose()
     # IndexingResult é um dict: num_added, num_updated, num_skipped, num_deleted.
     return banco, dict(resultado)
 
