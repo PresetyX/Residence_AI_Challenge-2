@@ -608,6 +608,14 @@ class AgenteSupervisor:
                     return {"status": "erro", "acao": "criar", "mensagem": "O Google confirmou a criação, mas não devolveu os dados. Confira sua agenda antes de tentar novamente."}
             return {"status": "confirmacao", "acao": "criar", "mensagem": "Responda 'sim' para criar o evento ou 'não' para cancelar."}
 
+        # Prévia de um cronograma aguardando: "sim"/"não" é lido pela string, sem LLM.
+        if self.cronograma_pendente is not None:
+            confirmacao = classificar_confirmacao(pedido)
+            if confirmacao is None:
+                return {"status": "confirmacao", "acao": "planejar",
+                        "mensagem": "Responda 'sim' para criar os eventos ou 'não' para cancelar."}
+            return self.confirmar_agendamento(confirmacao)
+
         # Pedido de projeto não depende da LLM (e pode citar "agenda" ou "marcar").
         if pede_projeto(pedido):
             return self._indisponivel("planejar")

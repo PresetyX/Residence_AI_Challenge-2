@@ -396,3 +396,34 @@ def test_i_sem_validacao_por_regex_de_criacao():
     for resto in ("crie|criar", "_horarios_do_pedido", "_conferir_texto"):
         assert resto not in codigo
     assert "quer_criar" not in codigo
+
+
+# ------------------------------- "sim"/"não" do cronograma não usa a LLM
+
+
+def _supervisor_com_cronograma():
+    llm = MagicMock()
+    sup = AgenteSupervisor(visualizador=simular_visualizador(), criador=simular_criador(), consultar_llm=llm)
+    sup.cronograma_pendente = [_dados(1, 8, 9)]
+    return sup, llm
+
+
+def test_cronograma_nao_cancela_sem_llm():
+    sup, llm = _supervisor_com_cronograma()
+    r = sup.executar("não")
+    assert r["status"] == "cancelado" and sup.cronograma_pendente is None
+    llm.assert_not_called()
+
+
+def test_cronograma_resposta_estranha_pede_sim_ou_nao():
+    sup, llm = _supervisor_com_cronograma()
+    r = sup.executar("talvez")
+    assert r["status"] == "confirmacao" and sup.cronograma_pendente is not None
+    llm.assert_not_called()
+
+
+def test_cronograma_sim_cria_sem_llm():
+    sup, llm = _supervisor_com_cronograma()
+    r = sup.executar("sim")
+    assert r["acao"] == "planejar" and sup.cronograma_pendente is None
+    llm.assert_not_called()

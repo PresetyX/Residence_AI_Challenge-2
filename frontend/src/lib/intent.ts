@@ -42,12 +42,6 @@ export function classifyConfirmation(text: string): boolean | null {
   return allYes && list.some((word) => YES_STRONG.has(word)) ? true : null;
 }
 
-/** A short message that tries to answer a yes/no question, even if unclearly. */
-export function looksLikeReply(text: string): boolean {
-  const list = words(text);
-  return list.length <= 6 && list.some((word) => YES_STRONG.has(word) || NO_WORDS.has(word));
-}
-
 const TIME_RANGE = /\b(?:das|de)\s+\d{1,2}(?:h|:)?\d{0,2}\s*(?:as|a|ate)\s+\d{1,2}/;
 const PROJECT_REQUEST =
   /^\W*(?:(?:oi|ola|bom dia|boa tarde|boa noite)\W+)?(?:(?:eu\s+)?(?:quero|queria|preciso|vou|gostaria|pretendo|planejo|me ajude|me ajuda|ajude-me)\s+(?:(?:de|a)\s+)?)?(?:(?:criar|crie|cria|desenvolver|desenvolva|construir|fazer|montar|programar|implementar|lancar|entregar|planejar|planeje|dividir|organizar|agendar)\s+)?(?:(?:um|uma|o|a|meu|minha|novo|nova|este|esse|pequeno|simples)\s+){0,3}(?:projeto|app|aplicativo|sistema|site|plataforma|api|software|jogo|game|dashboard|chatbot|bot|mvp|tcc|monografia|programa(?!\s+(?:um|uma|o|a)\b)|startup)\b/;

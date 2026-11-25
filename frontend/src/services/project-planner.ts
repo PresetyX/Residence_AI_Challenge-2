@@ -13,7 +13,6 @@ import {
   classifyConfirmation,
   isCalendarRequest,
   isProjectRequest,
-  looksLikeReply,
   normalizeText as normalize,
 } from "@/lib/intent";
 import type { ModelId, ProjectPlan } from "@/lib/types";
@@ -58,15 +57,10 @@ const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*)\b/;
 export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
 
-  // A plan or a calendar preview is waiting for a yes/no: that answer is ours,
-  // even when unclear (projectPlannerStream asks again). Anything else drops it.
-  if (awaitingConfirm || pendingSchedule) {
-    const reply = classifyConfirmation(text) !== null || looksLikeReply(text);
-    if (reply && !isProjectRequest(text)) return true;
-    if (awaitingConfirm) void scheduleService.confirm(false).catch(() => undefined);
-    awaitingConfirm = false;
-    pendingSchedule = null;
-  }
+  // A plan or a calendar preview is waiting for a yes/no: every message is ours
+  // (string check, no LLM) until the student says yes or no. projectPlannerStream
+  // asks again for anything else.
+  if (awaitingConfirm || pendingSchedule) return true;
 
   // A project that mentions "agenda" or "consulta" is still a project.
   if (isProjectRequest(text)) return true;
