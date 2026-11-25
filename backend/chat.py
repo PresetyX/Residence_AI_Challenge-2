@@ -7,7 +7,7 @@ Contrato (frontend/src/services/inference-service.ts):
         {"tipo": "token", "valor": "..."}             pedaço do texto da resposta
         {"tipo": "acao_agenda", "acao": "created", "evento": {...}}
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
-        {"tipo": "pedir_projeto"}                     fora do escopo: a próxima mensagem vai ao Planejador
+        {"tipo": "pedir_projeto"}                     pedido de plano: a próxima mensagem vai ao Planejador
         {"tipo": "fim_conversa"}                      pedido concluído: a próxima mensagem abre outra conversa
 
 POST /chat/reiniciar zera as confirmações pendentes do Supervisor (nova conversa).
@@ -93,10 +93,11 @@ def respostas_do_supervisor(
         except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
             resposta = {"status": "erro", "acao": "interpretar", "mensagem": f"Falha no Supervisor: {erro}"}
 
-    # Fora do escopo da agenda (ex.: "banana com azeite") ou pedido de plano que o
-    # Supervisor não encaminha: responde como o Planejador, pedindo o projeto. O
-    # frontend manda a próxima mensagem para o Planejador ("pedir_projeto").
-    pede_projeto = resposta.get("status") == "indisponivel" and resposta.get("acao") in ("fora_escopo", "planejar")
+    # Pedido de plano que o Supervisor não encaminha: responde como o Planejador,
+    # pedindo o projeto, e o frontend manda a próxima mensagem para ele
+    # ("pedir_projeto"). Fora do escopo ("Me chamo Leonardo") fica no Supervisor,
+    # que responde com as opções (criar evento, ver agenda, planejar projeto).
+    pede_projeto = resposta.get("status") == "indisponivel" and resposta.get("acao") == "planejar"
     if pede_projeto:
         resposta = {**resposta, "mensagem": MENSAGEM_NAO_ENTENDI}
 
@@ -110,7 +111,7 @@ def respostas_do_supervisor(
     if pede_projeto:
         yield _linha({"tipo": "pedir_projeto"})
     # Pedido que o Supervisor ainda não faz (editar, excluir...): oferecer o painel manual.
-    elif resposta.get("status") == "indisponivel":
+    elif resposta.get("status") == "indisponivel" and resposta.get("acao") != "fora_escopo":
         yield _linha({"tipo": "sugerir_painel_manual"})
 
     # O pedido chegou ao fim: o frontend encerra a conversa e a próxima mensagem

@@ -14,7 +14,7 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 | Criar um evento | `criar` | A LLM é a única etapa de interpretação (se faltar data ou horário, ou estiver ambíguo, ela devolve `esclarecer`). Depois o código valida (Pydantic, data futura, sono, agenda livre) e mostra a prévia com confirmação. Com o "sim", chama o agente Criar |
 | Agendar o plano de um projeto | `planejar` | Feito pelas rotas `POST /projetos/agendar` e `/confirmar` (abaixo), não pelo texto do chat |
 | Pedido incompleto | `esclarecer` | Devolve uma pergunta ao usuário |
-| Fora do escopo | `fora_escopo` | O chat responde com o "não entendi" do Planejador e a próxima mensagem vai para ele |
+| Fora do escopo | `fora_escopo` | O Supervisor responde "Não entendi. Você quer criar um evento, visualizar sua agenda ou planejar um projeto?" e a próxima mensagem segue o roteamento normal |
 | Editar ou excluir | (`indisponivel`) | Ainda não passam pelo Supervisor: o chat oferece o painel Agenda, que usa os agentes Editar e Excluir ([`editar.md`](editar.md), [`excluir.md`](excluir.md)) |
 
 O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente` ou `cronograma_pendente`). Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.

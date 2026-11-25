@@ -33,7 +33,7 @@ Linhas do NDJSON de `/chat/stream`:
 | `token` | Pedaço do texto da resposta |
 | `acao_agenda` | Evento criado (`acao: "created"` e o `evento`) |
 | `sugerir_painel_manual` | A IA não fez o pedido (ex.: editar ou excluir); oferecer o painel Agenda |
-| `pedir_projeto` | Fora do escopo: a próxima mensagem vai para o Planejador |
+| `pedir_projeto` | Pedido de plano sem projeto descrito: a próxima mensagem vai para o Planejador |
 | `fim_conversa` | Pedido concluído: a próxima mensagem abre outra conversa |
 
 ## Planejador e prazos (`backend/main.py`)

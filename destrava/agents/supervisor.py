@@ -702,7 +702,8 @@ class AgenteSupervisor:
     def _indisponivel(acao: str) -> dict:
         mensagens = {
             "planejar": "O Planejador ainda não foi integrado ao fluxo por texto do Supervisor.",
-            "fora_escopo": "Posso ajudar a consultar a agenda ou criar eventos.",
+            "fora_escopo": ("Não entendi. Você quer criar um evento, visualizar sua agenda "
+                            "ou planejar um projeto? Pode me dizer que eu faço!"),
         }
         return {"status": "indisponivel", "acao": acao,
                 "mensagem": mensagens.get(acao, "Essa funcionalidade ainda não está disponível.")}
