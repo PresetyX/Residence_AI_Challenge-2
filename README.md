@@ -12,11 +12,11 @@ O sistema tem três partes:
 
 | Agente | Situação |
 |---|---|
-| Visualização | Pronto: recebe um período em JSON e devolve os horários livres (somente leitura) |
+| Visualização | Pronto: recebe um período em JSON e devolve horários livres; pelo chat, também permite consultar eventos marcados e conflitos (somente leitura) |
 | Criar | Pronto: recebe título, início e fim em JSON e cria o evento |
 | Editar | Pronto: recebe o ID do evento e os campos que mudam, em JSON (sem LLM) |
 | Excluir | Pronto: recebe o ID do evento em JSON e exclui (a confirmação vem antes, no chat ou no painel) |
-| Supervisor | Pronto para consultar horários, criar, editar e excluir eventos por chat, e agendar o plano de um projeto (LLM, leitura de prazo, Pomodoro e confirmação; edições/exclusões também pedem confirmação) ([`docs/supervisor.md`](docs/supervisor.md)) |
+| Supervisor | Pronto para consultar horários livres, eventos marcados e conflitos, além de criar, editar e excluir eventos pelo chat. Operações de escrita pedem confirmação pelos botões; também prepara o agendamento de planos de projeto ([`docs/supervisor.md`](docs/supervisor.md)) |
 | Planejador | Pronto: transforma a descrição de um projeto em etapas com story points, usando o RAG ([`docs/planejador.md`](docs/planejador.md)) |
 | RAG (Supervisor e Planejador) | Máquina pronta, com LangChain (chunking, embeddings, banco vetorial Chroma, busca, prompt e geração). A base do Planejador tem conteúdo; a do Supervisor aguarda (ver [`docs/rag.md`](docs/rag.md)) |
 
@@ -74,10 +74,11 @@ Para iniciar o backend (todas as rotas estão em [`docs/api.md`](docs/api.md)):
 uvicorn backend.main:app
 ```
 
-A rota `GET /` responde com `{}`. O CORS libera o frontend em
-`http://localhost:3000` e `http://localhost:3210` (variável `CORS_ORIGINS`).
+A rota `GET /` responde com `{}`. O CORS libera origens em `localhost` e `127.0.0.1` em qualquer porta por padrão;
+`CORS_ORIGINS` permite configurar origens adicionais.
 Erros do planejador voltam como `422` (entrada inválida), `502` (resposta da IA
-fora do contrato) ou `503` (Ollama indisponível), com a mensagem em `detail`.
+fora do contrato) ou `503` (Ollama ou serviço de story points indisponível),
+com a mensagem em `detail`.
 
 ### Frontend
 
@@ -100,7 +101,10 @@ O frontend sempre usa o backend (não há mocks; o endereço fica em `frontend/.
 | `POST /calendar/events` | Agente de criação |
 | `PUT /calendar/events/{id}` | Agente de edição |
 | `DELETE /calendar/events/{id}` | Agente de exclusão |
-| `POST /chat/stream` | Chat com o Supervisor (Ollama) |
+| `POST /calendar/events/{id}/concluir` | Marca uma etapa do plano como concluída, sem excluir o evento |
+| `POST /chat/stream` | Chat com o Supervisor (Ollama): consulta horários livres, eventos marcados e conflitos; cria, edita ou exclui eventos com confirmação |
+| `POST /chat/confirmar` | Confirma ou cancela a operação pendente do chat pelo botão Sim/Não |
+| `POST /chat/reiniciar` | Limpa a confirmação pendente ao iniciar uma nova conversa |
 | `POST /projetos` | Planejador + story points. `prazo` é opcional: o Supervisor lê o prazo do texto (`destrava/core/prazo.py`) |
 | `POST /prazos/interpretar` | Lê um prazo como "até amanhã", "tenho uma semana", "20/12" |
 | `POST /projetos/agendar`, `POST /projetos/agendar/confirmar` | Supervisor: classifica o prazo, mostra a prévia e cria os eventos |
@@ -155,8 +159,8 @@ antes de qualquer pedido (`frontend/src/services/onboarding.ts`):
    60 min, `pomodoro.py`). Mínimo de 3 respostas.
 
 Depois, "configurar sono" e "calibrar" no chat refazem cada rodada. O perfil
-fica em `data/perfis.json` (por e-mail) até o banco de dados dos story points
-ficar pronto (TODO em `backend/perfil.py`). Pela API:
+fica em `data/perfis.json` (por e-mail); a migração do armazenamento de perfis
+para banco de dados ainda está pendente (TODO em `backend/perfil.py`). Pela API:
 
 ```
 curl "http://127.0.0.1:8000/perfil?email=voce@gmail.com"
@@ -168,8 +172,9 @@ curl -X POST http://127.0.0.1:8000/calibracao `
   -d '[30, 70, null, 80, 50, 100, 60, 10, 40, 130]'
 ```
 
-Ao registrar uma tarefa concluída com `POST /historico`, o tempo real entra na
-média histórica de `data/historico.json` (base para o futuro banco):
+Ao registrar uma tarefa concluída com `POST /historico`, o tempo real atualiza
+a média histórica em `data/historico.json`. Os story points associados aos
+eventos do plano são registrados separadamente em `data/eventos.db`:
 
 ```
 curl -X POST http://127.0.0.1:8000/historico `
@@ -407,11 +412,12 @@ O índice do RAG (Chroma) é gerado na primeira execução com os embeddings do 
 
 ```
 backend/
-├── main.py                    API FastAPI: /projetos, /prazos/interpretar, /historico, /tarefas, /calibracao
-├── chat.py                    /chat/stream (Supervisor, NDJSON) e /projetos/agendar (prévia e confirmação)
+├── main.py                    API FastAPI: projetos, prazos, agendamento de planos, histórico, tarefas e calibração
+├── chat.py                    /chat/stream e /chat/confirmar (Supervisor, NDJSON); reinício de conversa
 ├── calendario.py              login Google e CRUD de eventos (/auth/*, /calendar/events)
 ├── perfil.py                  perfil da conta: sono e calibração dos story points (/perfil)
 ├── history_models.py          modelos do histórico de tarefas concluídas
+├── database.py                story points associados aos eventos em data/eventos.db
 ├── story_points.py            estimativa de story points: local (torch) ou cliente HTTP do servidor de IA
 └── servidor_story_points.py   serviço de story points do servidor de IA (POST /story-points)
 docker/                        Dockerfile do serviço de story points
