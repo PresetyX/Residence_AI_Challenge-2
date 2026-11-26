@@ -15,6 +15,7 @@ from destrava.core import config
 from destrava.core.intencao import classificar_confirmacao, consulta_agenda, pede_projeto
 from destrava.core.llm_client import ErroLLM, extrair_json, perguntar
 from destrava.core.models import PedidoCriacao, PedidoVisualizacao
+from destrava.core.horario import tem_numero_negativo
 from destrava.core.prazo import interpretar_prazo
 from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro, SemEspacoPomodoro, calcular_deficit_minimo, periodo_acordado
 from destrava.prompts.supervisor import PROMPT_SUPERVISOR
@@ -615,6 +616,11 @@ class AgenteSupervisor:
                 return {"status": "confirmacao", "acao": "planejar",
                         "mensagem": "Responda 'sim' para criar os eventos ou 'não' para cancelar."}
             return self.confirmar_agendamento(confirmacao)
+
+        # Antes da LLM: ela poderia transformar "-1h" em um horário válido.
+        if tem_numero_negativo(pedido):
+            return {"status": "esclarecimento", "acao": "esclarecer",
+                    "mensagem": "Horários, durações e prazos não podem ser negativos. Envie um novo pedido completo."}
 
         # Pedido de projeto não depende da LLM (e pode citar "agenda" ou "marcar").
         if pede_projeto(pedido):

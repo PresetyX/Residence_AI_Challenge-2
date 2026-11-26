@@ -24,6 +24,41 @@ _NUMEROS = {
 }
 
 
+# Sinal de menos colado a um número (hífen ou "−") no começo de uma palavra.
+_SINAL = re.compile(r"(?<![^\s(\[=:,;])[-−](?=\d)")
+# "10h -11h" é um intervalo: antes do traço já há um número ou horário.
+_NUMERO_ANTES = re.compile(r"\d\s*(?:h|hrs?|horas?|min|minutos?)?\s*$", re.IGNORECASE)
+_UNIDADE_DEPOIS = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?::\d|(?:h|hrs?|horas?|min|minutos?|dias?|semanas?|m[eê]s|meses|anos?)(?![a-zà-ú]))"
+    r"|\d+h\d",
+    re.IGNORECASE,
+)
+# Palavras depois das quais um número é um horário ou um prazo.
+_PALAVRA_DE_TEMPO = re.compile(r"(?<!\w)(?:das|às|as|até|ate|em|daqui a|tenho)\s*$", re.IGNORECASE)
+_COMECA_COM_MENOS = re.compile(r"^\s*menos\s+\d", re.IGNORECASE)
+
+
+def tem_numero_negativo(texto: str, qualquer: bool = False) -> bool:
+    """O texto traz um horário, duração ou prazo negativo ("-1h", "em -3 dias").
+
+    Traços que não são sinal ficam de fora: "13h-14h", "10h - 11h", "20-12",
+    "2026-12-20", "sexta-feira" e "turma -2".
+
+    Args:
+        qualquer: para respostas que são só um número (sono e calibração):
+            todo número negativo conta, mesmo sem unidade ("-3").
+    """
+    if qualquer and _COMECA_COM_MENOS.search(texto):
+        return True
+    for sinal in _SINAL.finditer(texto):
+        antes, depois = texto[: sinal.start()], texto[sinal.end():]
+        if _NUMERO_ANTES.search(antes):
+            continue
+        if qualquer or _UNIDADE_DEPOIS.match(depois) or _PALAVRA_DE_TEMPO.search(antes):
+            return True
+    return False
+
+
 def _normalizar(texto: str) -> str:
     sem_acento = unicodedata.normalize("NFD", texto.lower())
     sem_acento = "".join(c for c in sem_acento if unicodedata.category(c) != "Mn")
@@ -48,6 +83,8 @@ def interpretar_horario(texto: str, tipo: TipoHorario) -> time | None:
     Sem "da manhã"/"da noite", a hora ambígua é lida pelo tipo: para dormir,
     "11" é 23h e "1" é 1h da madrugada; para acordar, "7" é 7h.
     """
+    if tem_numero_negativo(texto, qualquer=True):
+        return None
     t = _normalizar(texto)
     if re.search(r"\bmeia noite\b", t):
         hora, minuto = 0, 30 if re.search(r"meia noite e meia", t) else 0
@@ -96,6 +133,8 @@ def interpretar_duracao(texto: str) -> int | None:
     Um dia de trabalho vale 8 horas. Número solto até 12 é lido como horas
     ("3" = 3 horas); acima disso, como minutos ("45" = 45 minutos).
     """
+    if tem_numero_negativo(texto, qualquer=True):
+        return None
     t = _normalizar(texto)
     t = re.sub(r"\bmeia hora\b", "30 min", t)
     t = re.sub(r"\b(\d+)\s*(?:h|horas?)\s+e\s+meia\b", lambda m: f"{m.group(1)}h 30min", t)
