@@ -324,6 +324,25 @@ def criar_projeto(
     return resposta
 
 
+def _registrar_observacao(minutos_por_story_point: float) -> None:
+    """Soma uma tarefa real à média de minutos por story point."""
+    global media_minutos_por_story_point, _quantidade_observacoes_media
+    with _LOCK_HISTORICO:
+        total_observacoes = _quantidade_observacoes_media + 1
+        media_minutos_por_story_point = (
+            media_minutos_por_story_point * _quantidade_observacoes_media
+            + minutos_por_story_point
+        ) / total_observacoes
+        _quantidade_observacoes_media = total_observacoes
+        _salvar_historico()
+
+    print(f"Nova média de minutos por story point: {media_minutos_por_story_point:.2f}")
+
+
+# Usada também ao concluir uma etapa no painel (backend/calendario.py).
+app.state.registrar_observacao = _registrar_observacao
+
+
 @app.post("/historico", response_model=StatusResponse, status_code=201)
 def registrar_historico(
     historico: HistoricoTarefaRequest,
@@ -340,18 +359,7 @@ def registrar_historico(
             detail="Os story points devem ser maiores que zero para compor a média.",
         )
 
-    global media_minutos_por_story_point, _quantidade_observacoes_media
-    with _LOCK_HISTORICO:
-        fator_tarefa = historico.tempo_real_minutos / story_points
-        total_observacoes = _quantidade_observacoes_media + 1
-        media_minutos_por_story_point = (
-            media_minutos_por_story_point * _quantidade_observacoes_media
-            + fator_tarefa
-        ) / total_observacoes
-        _quantidade_observacoes_media = total_observacoes
-        _salvar_historico()
-
-    print(f"Nova média de minutos por story point: {media_minutos_por_story_point:.2f}")
+    _registrar_observacao(historico.tempo_real_minutos / story_points)
 
     return {"status": "sucesso"}
 

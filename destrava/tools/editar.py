@@ -15,6 +15,7 @@ sabem qual é). Escopo OAuth: calendar (escrita).
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -110,14 +111,37 @@ def e_tarefa_do_plano(evento: dict[str, Any]) -> bool:
     return (evento.get("summary") or "").startswith(PREFIXO_TAREFA) or bool(privado.get("meta"))
 
 
-def alteracao_de_conclusao(evento: dict[str, Any]) -> dict[str, Any]:
+def tarefa_concluida(evento: dict[str, Any]) -> bool:
+    return evento.get("extendedProperties", {}).get("private", {}).get("concluido") == "true"
+
+
+def fracao_do_trabalho(evento: dict[str, Any]) -> float | None:
+    """Quanto da etapa este evento representa (1.0 se a etapa não foi dividida).
+
+    Cada parte guarda os story points da etapa inteira, então o tempo de uma parte
+    só pode ser comparado com a fração do trabalho que ela cobre, lida da
+    descrição escrita pelo encaixe (encaixe_pomodoro.py). None: o evento é uma
+    parte, mas a descrição não diz o tamanho dela.
+    """
+    descricao = evento.get("description") or ""
+    parte = re.search(r"Parte \d+/\d+: (\d+) minutos de trabalho nesta parte", descricao)
+    if parte is None:
+        return None if re.search(r"Parte \d+/\d+", evento.get("summary") or "") else 1.0
+    total = re.search(r"Trabalho estimado: (\d+) minutos", descricao)
+    if total is None or int(total.group(1)) <= 0 or int(parte.group(1)) <= 0:
+        return None
+    return int(parte.group(1)) / int(total.group(1))
+
+
+def alteracao_de_conclusao(evento: dict[str, Any], tempo_gasto_minutos: int) -> dict[str, Any]:
     """Corpo do PATCH que marca a tarefa como feita, sem mexer em mais nada.
 
     A marca fica no próprio evento (propriedade privada do app). As outras
     propriedades privadas são reenviadas para não se perderem.
     """
     privado = evento.get("extendedProperties", {}).get("private", {})
-    return {"extendedProperties": {"private": {**privado, "concluido": "true"}}}
+    marcas = {"concluido": "true", "tempo_gasto_minutos": str(tempo_gasto_minutos)}
+    return {"extendedProperties": {"private": {**privado, **marcas}}}
 
 
 def evento_resumido(evento: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +163,9 @@ def evento_resumido(evento: dict[str, Any]) -> dict[str, Any]:
         resumo["meta"] = meta
     if privado.get("concluido") == "true":
         resumo["concluido"] = True
+        tempo = str(privado.get("tempo_gasto_minutos") or "")
+        if tempo.isdigit():
+            resumo["tempo_gasto_minutos"] = int(tempo)
     return resumo
 
 

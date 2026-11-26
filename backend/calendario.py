@@ -8,7 +8,7 @@ respostas de agenda seguem o envelope dos agentes (RespostaAgente):
     POST   /calendar/events            -> dados {evento: EventDto}  (agente criar)
     PUT    /calendar/events/{id}       -> dados {evento: EventDto}  (agente editar)
     DELETE /calendar/events/{id}       -> dados {evento_id}         (agente excluir)
-    POST   /calendar/events/{id}/concluir
+    POST   /calendar/events/{id}/concluir {tempo_gasto_minutos}
                                        -> dados {evento: EventDto}  (marca a etapa como feita)
 
     POST /auth/google/session {consent, scopes} -> {user, grantedScopes}
@@ -31,17 +31,20 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from googleapiclient.errors import HttpError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StrictInt
 
 from backend import perfil
+from backend.database import buscar_storypoints_evento
 from destrava.tools.criar import AgenteCriar
 from destrava.tools.editar import (
     AgenteEditar,
     alteracao_de_conclusao,
     e_tarefa_do_plano,
     evento_resumido,
+    fracao_do_trabalho,
+    tarefa_concluida,
 )
 from destrava.tools.excluir import AgenteExcluir
 from destrava.core import config
@@ -189,9 +192,21 @@ def excluir(id_evento: str) -> dict:
     return AgenteExcluir(servico=servico).executar_json({"id": id_evento})
 
 
+# Um agendamento cabe em um dia: mais que isso é erro de digitação.
+TEMPO_GASTO_MAXIMO_MINUTOS = 24 * 60
+
+
+class ConcluirRequest(BaseModel):
+    tempo_gasto_minutos: StrictInt = Field(ge=1, le=TEMPO_GASTO_MAXIMO_MINUTOS)
+
+
 @router.post("/calendar/events/{id_evento}/concluir")
-def concluir(id_evento: str) -> dict:
-    """Marca uma etapa do plano como concluída. O evento continua na agenda."""
+def concluir(id_evento: str, corpo: ConcluirRequest, request: Request) -> dict:
+    """Marca uma etapa do plano como concluída, com o tempo que o estudante gastou.
+
+    O evento continua na agenda. O tempo informado também entra na média de
+    minutos por story point (a mesma de POST /historico).
+    """
     servico = _servico()
     try:
         bruto = obter_evento(servico, id_evento)
@@ -202,13 +217,39 @@ def concluir(id_evento: str) -> dict:
                 "tarefa_nao_concluida", "NaoEhTarefa",
                 "Só as etapas de um plano podem ser marcadas como concluídas.",
             )
-        atualizado = atualizar_evento(servico, id_evento, alteracao_de_conclusao(bruto))
+        if tarefa_concluida(bruto):
+            # Repetir contaria o tempo duas vezes na média.
+            return _envelope_erro(
+                "tarefa_nao_concluida", "JaConcluida", "Esta tarefa já foi concluída.",
+            )
+        atualizado = atualizar_evento(
+            servico, id_evento, alteracao_de_conclusao(bruto, corpo.tempo_gasto_minutos)
+        )
     except HttpError as erro:
         if getattr(erro.resp, "status", None) in (404, 410):
             raise HTTPException(status_code=404, detail="Agendamento não encontrado.") from erro
         return _envelope_erro("tarefa_nao_concluida", "HttpError", str(erro.reason))
+    _registrar_tempo_real(request, id_evento, bruto, corpo.tempo_gasto_minutos)
     evento = _converter_inicio_fim(evento_resumido(atualizado))
     return _envelope_sucesso("tarefa_concluida", {"evento": evento})
+
+
+def _registrar_tempo_real(request: Request, id_evento: str, evento: dict, minutos: int) -> None:
+    """Leva o tempo informado para a média de minutos por story point.
+
+    Sem story points guardados (ou sem saber o tamanho da parte) nada é
+    registrado. Uma falha aqui não desfaz a conclusão, que já está na agenda.
+    """
+    registrar = getattr(request.app.state, "registrar_observacao", None)
+    if registrar is None:
+        return
+    try:
+        story_points = buscar_storypoints_evento(id_evento)
+        fracao = fracao_do_trabalho(evento)
+        if story_points and story_points > 0 and fracao:
+            registrar(minutos / (story_points * fracao))
+    except Exception as erro:
+        print(f"Não consegui registrar o tempo gasto no histórico: {erro}")
 
 
 def _mensagem_amigavel(mensagem: str) -> str:

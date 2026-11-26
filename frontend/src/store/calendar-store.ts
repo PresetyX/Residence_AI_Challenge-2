@@ -18,7 +18,7 @@ interface CalendarState {
   /** Sends the payload the user confirmed in the delete modal, unchanged. */
   deleteEvent: (payload: DeleteEventPayload) => Promise<void>;
   /** The student confirmed a plan step as done. */
-  completeEvent: (id: string) => Promise<void>;
+  completeEvent: (id: string, spentMinutes: number) => Promise<void>;
   reset: () => void;
 }
 
@@ -90,9 +90,9 @@ export const useCalendarStore = create<CalendarState>()((set, get) => ({
     }
   },
 
-  async completeEvent(id) {
+  async completeEvent(id, spentMinutes) {
     try {
-      const saved = await calendarService.completeEvent(id);
+      const saved = await calendarService.completeEvent(id, spentMinutes);
       set((state) => ({ events: { ...state.events, [saved.id]: saved } }));
     } catch (error) {
       throw new Error(toMessage(error, "Não foi possível marcar a tarefa como concluída."));

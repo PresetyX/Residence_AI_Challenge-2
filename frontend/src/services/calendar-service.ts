@@ -17,8 +17,8 @@ export interface CalendarService {
   createEvent(input: CalendarEventInput, planGoal?: string): Promise<CalendarEvent>;
   updateEvent(id: string, input: CalendarEventInput): Promise<CalendarEvent>;
   deleteEvent(payload: DeleteEventPayload): Promise<void>;
-  /** Marks a plan step as done without removing the event. */
-  completeEvent(id: string): Promise<CalendarEvent>;
+  /** Marks a plan step as done, with the time spent, without removing the event. */
+  completeEvent(id: string, spentMinutes: number): Promise<CalendarEvent>;
 }
 
 /** Builds the exact payload the delete confirmation modal shows and then sends. */
@@ -89,10 +89,10 @@ const httpCalendarService: CalendarService = {
     );
     unwrapAgentResponse(response);
   },
-  async completeEvent(id) {
+  async completeEvent(id, spentMinutes) {
     const response = await request<EventResponse>(
       `/calendar/events/${encodeURIComponent(id)}/concluir`,
-      { method: "POST" },
+      { method: "POST", body: JSON.stringify({ tempo_gasto_minutos: spentMinutes }) },
     );
     return toCalendarEvent(unwrapAgentResponse(response).evento);
   },

@@ -15,7 +15,13 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { formatDuration, formatLongDate, formatShortDate, formatTime } from "@/lib/format";
+import {
+  formatDuration,
+  formatLongDate,
+  formatMinutes,
+  formatShortDate,
+  formatTime,
+} from "@/lib/format";
 import type { CalendarEvent, SyncStatus } from "@/lib/types";
 import { isPlanTask } from "@/services/contracts";
 import { useUiStore } from "@/store/ui-store";
@@ -76,7 +82,9 @@ export function EventDetails({ event }: { event: CalendarEvent }) {
         </p>
       </div>
 
-      {isPlanTask(event) && <Completion done={event.completed ?? false} />}
+      {isPlanTask(event) && (
+        <Completion done={event.completed ?? false} spentMinutes={event.spentMinutes} />
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <TimeBox label="Início" iso={event.start} />
@@ -130,7 +138,7 @@ export function EventDetails({ event }: { event: CalendarEvent }) {
 }
 
 /** Plan steps only: the button to mark it as done, or the green check once it is. */
-function Completion({ done }: { done: boolean }) {
+function Completion({ done, spentMinutes }: { done: boolean; spentMinutes?: number }) {
   const openConfirmation = useUiStore((state) => state.setCompleteModalOpen);
 
   if (done) {
@@ -140,7 +148,14 @@ function Completion({ done }: { done: boolean }) {
         className="flex items-center gap-2.5 rounded-2xl border border-emerald-400/40 bg-emerald-500/15 px-4 py-3 text-sm font-medium text-emerald-200"
       >
         <CircleCheck className="size-5 shrink-0 text-emerald-300" aria-hidden="true" />
-        Tarefa concluída
+        <span>
+          Tarefa concluída
+          {spentMinutes ? (
+            <span className="block text-xs font-normal text-emerald-100/80">
+              Tempo gasto: {formatMinutes(spentMinutes)}
+            </span>
+          ) : null}
+        </span>
       </p>
     );
   }

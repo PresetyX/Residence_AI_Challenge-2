@@ -30,6 +30,7 @@ export interface EventDto {
   meta?: string | null;
   /** Present (true) once the plan step was confirmed as done. */
   concluido?: boolean;
+  tempo_gasto_minutos?: number;
 }
 
 export interface AgentResponseDto<TData> {
@@ -75,6 +76,7 @@ export function toCalendarEvent(dto: EventDto): CalendarEvent {
     updatedAt: new Date().toISOString(),
     planGoal: dto.meta ?? undefined,
     completed: dto.concluido ?? false,
+    spentMinutes: dto.tempo_gasto_minutos,
   };
 }
 
