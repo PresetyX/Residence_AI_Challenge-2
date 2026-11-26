@@ -3,7 +3,7 @@
 import { ArrowUp, Square } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { getModel } from "@/lib/models";
-import { useChatStore } from "@/store/chat-store";
+import { selectAwaitingAnswer, useChatStore } from "@/store/chat-store";
 
 const MAX_HEIGHT_PX = 200;
 
@@ -12,10 +12,11 @@ export function Composer() {
   const stopGenerating = useChatStore((state) => state.stopGenerating);
   const isGenerating = useChatStore((state) => state.isGenerating);
   const model = useChatStore((state) => getModel(state.selectedModelId));
+  const awaitingAnswer = useChatStore(selectAwaitingAnswer);
 
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const canSend = value.trim().length > 0 && !isGenerating;
+  const canSend = value.trim().length > 0 && !isGenerating && !awaitingAnswer;
 
   // Grow with the content up to MAX_HEIGHT_PX, then scroll.
   useEffect(() => {
@@ -59,9 +60,10 @@ export function Composer() {
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Peça algo ao Destrava…"
+          disabled={awaitingAnswer}
+          placeholder={awaitingAnswer ? "Responda com os botões Sim ou Não" : "Peça algo ao Destrava…"}
           aria-describedby="chat-input-hint"
-          className="min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.9375rem] leading-relaxed text-white outline-none placeholder:text-slate-500"
+          className="min-h-10 flex-1 resize-none bg-transparent py-2 text-[0.9375rem] leading-relaxed text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed"
         />
         {isGenerating ? (
           <button

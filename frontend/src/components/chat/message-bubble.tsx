@@ -1,12 +1,14 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { CalendarPlus, CircleAlert } from "lucide-react";
+import { CalendarPlus, Check, CircleAlert, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/ui/logo";
 import { memo } from "react";
 import { formatTime } from "@/lib/format";
 import { getModel } from "@/lib/models";
 import type { ChatMessage } from "@/lib/types";
+import { useChatStore } from "@/store/chat-store";
 import { useUiStore } from "@/store/ui-store";
 import { CalendarEventCard } from "./calendar-event-card";
 import { CalendarPlanCard } from "./calendar-plan-card";
@@ -111,6 +113,10 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
           </div>
         )}
 
+        {message.confirmation === "pending" && message.status === "done" && (
+          <ConfirmationButtons messageId={message.id} />
+        )}
+
         {message.endsConversation && message.status === "done" && (
           <p
             role="status"
@@ -135,6 +141,34 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
         )}
       </div>
     </motion.li>
+  );
+}
+
+/** The only way to answer a yes/no question: nothing typed is interpreted. */
+function ConfirmationButtons({ messageId }: { messageId: string }) {
+  const answer = useChatStore((state) => state.answerConfirmation);
+  const isGenerating = useChatStore((state) => state.isGenerating);
+
+  return (
+    <div role="group" aria-label="Responder à pergunta" className="mt-4 flex flex-wrap gap-3">
+      <Button
+        className="min-w-28"
+        disabled={isGenerating}
+        icon={<Check className="size-4" aria-hidden="true" />}
+        onClick={() => void answer(messageId, true)}
+      >
+        Sim
+      </Button>
+      <Button
+        variant="secondary"
+        className="min-w-28"
+        disabled={isGenerating}
+        icon={<X className="size-4" aria-hidden="true" />}
+        onClick={() => void answer(messageId, false)}
+      >
+        Não
+      </Button>
+    </div>
   );
 }
 

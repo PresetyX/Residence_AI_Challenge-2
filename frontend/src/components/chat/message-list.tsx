@@ -48,7 +48,14 @@ export function MessageList({ userFirstName }: { userFirstName: string }) {
   // While tokens stream in, follow along only if the user has not scrolled up.
   useEffect(() => {
     if (pinnedRef.current) scrollToBottom("auto");
-  }, [lastMessage?.content, lastMessage?.calendarActions, lastMessage?.suggestsManualPanel, scrollToBottom]);
+  }, [
+    lastMessage?.content,
+    lastMessage?.calendarActions,
+    lastMessage?.suggestsManualPanel,
+    lastMessage?.confirmation,
+    lastMessage?.status,
+    scrollToBottom,
+  ]);
 
   return (
     <div className="relative min-h-0 flex-1">

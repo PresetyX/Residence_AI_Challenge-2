@@ -571,6 +571,39 @@ class AgenteSupervisor:
             return False
         return False
 
+    def confirmar_evento(self, confirmado: bool) -> dict:
+        """Cria (ou descarta) o evento avulso que está aguardando confirmação."""
+        evento = self.evento_pendente
+        if evento is None:
+            return {"status": "erro", "acao": "criar", "mensagem": "Não existe evento aguardando confirmação."}
+
+        # Apaga a pendência antes de criar: um segundo "sim" não repete o evento.
+        self.evento_pendente = None
+        if not confirmado:
+            return {"status": "cancelado", "acao": "criar", "mensagem": "Criação cancelada. Nenhum evento foi criado."}
+
+        self.cronograma_pendente = None
+        try:
+            # O início pode ter passado desde que a prévia foi mostrada.
+            PedidoCriacao.model_validate(evento)
+        except ValidationError:
+            return {"status": "erro", "acao": "criar", "mensagem": "O evento já não está em uma data futura. Nenhum evento foi criado."}
+        if not self.verificar_disponibilidade(evento):
+            return {"status": "erro", "acao": "criar", "mensagem": "Esse horário não está mais disponível. Nenhum evento foi criado."}
+        try:
+            resposta = self.criador.executar_json(evento)
+        except Exception as erro:
+            return {"status": "erro", "acao": "criar", "mensagem": f"Falha ao criar evento: {erro}"}
+        if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
+            detalhe = resposta.get("erro") if isinstance(resposta, dict) else None
+            mensagem = detalhe.get("mensagem") if isinstance(detalhe, dict) else "Falha desconhecida."
+            return {"status": "erro", "acao": "criar", "mensagem": f"Não foi possível criar o evento: {mensagem}"}
+        try:
+            criado = resposta["dados"]["evento"]
+            return {"status": "sucesso", "acao": "criar", "mensagem": f"Evento '{criado['titulo']}' criado com sucesso!", "dados": criado}
+        except (KeyError, TypeError):
+            return {"status": "erro", "acao": "criar", "mensagem": "O Google confirmou a criação, mas não devolveu os dados. Confira sua agenda antes de tentar novamente."}
+
     def executar(self, pedido: str) -> dict:
         """Interpreta cada pedido de forma independente, sem memória de esclarecimentos."""
         if not isinstance(pedido, str) or not pedido.strip():
@@ -578,36 +611,14 @@ class AgenteSupervisor:
         pedido = pedido.strip()
 
         # A única mensagem contextual é 'sim'/'não' para um evento já confirmado na prévia.
+        # No chat web a resposta vem dos botões (POST /chat/confirmar); o texto
+        # continua valendo para quem usa o Supervisor fora do navegador.
         if self.evento_pendente is not None:
             confirmacao = classificar_confirmacao(pedido)
-            if confirmacao is False:
-                self.evento_pendente = None
-                return {"status": "cancelado", "acao": "criar", "mensagem": "Criação cancelada. Nenhum evento foi criado."}
-            if confirmacao is True:
-                evento = self.evento_pendente
-                self.evento_pendente = None
-                self.cronograma_pendente = None
-                try:
-                    # O início pode ter passado desde que a prévia foi mostrada.
-                    PedidoCriacao.model_validate(evento)
-                except ValidationError:
-                    return {"status": "erro", "acao": "criar", "mensagem": "O evento já não está em uma data futura. Nenhum evento foi criado."}
-                if not self.verificar_disponibilidade(evento):
-                    return {"status": "erro", "acao": "criar", "mensagem": "Esse horário não está mais disponível. Nenhum evento foi criado."}
-                try:
-                    resposta = self.criador.executar_json(evento)
-                except Exception as erro:
-                    return {"status": "erro", "acao": "criar", "mensagem": f"Falha ao criar evento: {erro}"}
-                if not isinstance(resposta, dict) or resposta.get("status") != "sucesso":
-                    detalhe = resposta.get("erro") if isinstance(resposta, dict) else None
-                    mensagem = detalhe.get("mensagem") if isinstance(detalhe, dict) else "Falha desconhecida."
-                    return {"status": "erro", "acao": "criar", "mensagem": f"Não foi possível criar o evento: {mensagem}"}
-                try:
-                    criado = resposta["dados"]["evento"]
-                    return {"status": "sucesso", "acao": "criar", "mensagem": f"Evento '{criado['titulo']}' criado com sucesso!", "dados": criado}
-                except (KeyError, TypeError):
-                    return {"status": "erro", "acao": "criar", "mensagem": "O Google confirmou a criação, mas não devolveu os dados. Confira sua agenda antes de tentar novamente."}
-            return {"status": "confirmacao", "acao": "criar", "mensagem": "Responda 'sim' para criar o evento ou 'não' para cancelar."}
+            if confirmacao is None:
+                return {"status": "confirmacao", "acao": "criar",
+                        "mensagem": "Responda 'sim' para criar o evento ou 'não' para cancelar."}
+            return self.confirmar_evento(confirmacao)
 
         # Prévia de um cronograma aguardando: "sim"/"não" é lido pela string, sem LLM.
         if self.cronograma_pendente is not None:

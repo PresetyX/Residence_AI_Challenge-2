@@ -9,6 +9,11 @@ Contrato (frontend/src/services/inference-service.ts):
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
         {"tipo": "pedir_projeto"}                     pedido de plano: a próxima mensagem vai ao Planejador
         {"tipo": "fim_conversa"}                      pedido concluído: a próxima mensagem abre outra conversa
+        {"tipo": "pedir_confirmacao"}                 mostrar os botões Sim e Não
+
+POST /chat/confirmar {"confirmado": bool} é o clique em um desses botões e
+responde no mesmo formato NDJSON. No chat web, texto digitado nunca confirma:
+com uma pendência aberta, o backend só mostra os botões de novo.
 
 POST /chat/reiniciar zera as confirmações pendentes do Supervisor (nova conversa).
 
@@ -28,8 +33,9 @@ from typing import Literal
 
 from fastapi import APIRouter, Request
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
+from backend.database import salvar_storypoints_eventos
 from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI
 from destrava.agents.supervisor import AgenteSupervisor
 from destrava.core import config
@@ -39,10 +45,18 @@ router = APIRouter()
 
 _lock = threading.Lock()
 
+USE_OS_BOTOES = "Use os botões **Sim** ou **Não** para responder."
+# Frases do Supervisor que pedem para digitar; no chat web quem responde são os botões.
+_PEDE_PARA_DIGITAR = re.compile(r"\s*(?:\be )?\bresponda 'sim'[^.]*\.?", re.IGNORECASE)
+
 
 class MensagemChat(BaseModel):
     papel: Literal["usuario", "assistente"]
     conteudo: str
+
+
+class ConfirmarChatRequest(BaseModel):
+    confirmado: StrictBool
 
 
 class ChatRequest(BaseModel):
@@ -86,13 +100,56 @@ def respostas_do_supervisor(
     yield _linha({"tipo": "status", "valor": f"Consultando o modelo {modelo or config.MODELO}…"})
 
     with _lock:
-        if modelo:
-            supervisor.consultar_llm = partial(perguntar, modelo=modelo)
-        try:
-            resposta = supervisor.executar(pedido)
-        except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
-            resposta = {"status": "erro", "acao": "interpretar", "mensagem": f"Falha no Supervisor: {erro}"}
+        pendente = _acao_pendente(supervisor)
+        if pendente:
+            # Há uma pergunta aberta: nada digitado cria ou cancela eventos.
+            resposta = {"status": "confirmacao", "acao": pendente, "mensagem": USE_OS_BOTOES}
+        else:
+            if modelo:
+                supervisor.consultar_llm = partial(perguntar, modelo=modelo)
+            try:
+                resposta = supervisor.executar(pedido)
+            except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
+                resposta = {"status": "erro", "acao": "interpretar", "mensagem": f"Falha no Supervisor: {erro}"}
 
+    yield from _linhas_da_resposta(resposta)
+
+
+def _acao_pendente(supervisor: AgenteSupervisor) -> str | None:
+    """Ação que espera um Sim ou Não, se houver."""
+    if getattr(supervisor, "evento_pendente", None) is not None:
+        return "criar"
+    if getattr(supervisor, "cronograma_pendente", None) is not None:
+        return "planejar"
+    return None
+
+
+def respostas_da_confirmacao(supervisor: AgenteSupervisor, confirmado: bool) -> Iterator[str]:
+    """Executa o clique em Sim ou Não e devolve as linhas NDJSON da resposta."""
+    if confirmado:
+        yield _linha({"tipo": "status", "valor": "Criando no Google Agenda…"})
+
+    with _lock:
+        pendente = _acao_pendente(supervisor)
+        try:
+            if pendente == "criar":
+                resposta = supervisor.confirmar_evento(confirmado)
+            elif pendente == "planejar":
+                resposta = supervisor.confirmar_agendamento(confirmado)
+                dados = resposta.get("dados")
+                if isinstance(dados, dict):
+                    salvar_storypoints_eventos(dados.get("eventos_criados", []))
+            else:
+                resposta = {"status": "erro", "acao": "confirmar",
+                            "mensagem": "Não há nada aguardando confirmação. Envie um novo pedido."}
+        except Exception as erro:
+            resposta = {"status": "erro", "acao": "confirmar", "mensagem": f"Falha ao confirmar: {erro}"}
+
+    yield from _linhas_da_resposta(resposta)
+
+
+def _linhas_da_resposta(resposta: dict) -> Iterator[str]:
+    """Converte a resposta do Supervisor nas linhas NDJSON do chat."""
     # Pedido de plano que o Supervisor não encaminha: responde como o Planejador,
     # pedindo o projeto, e o frontend manda a próxima mensagem para ele
     # ("pedir_projeto"). Fora do escopo ("Me chamo Leonardo") fica no Supervisor,
@@ -102,6 +159,9 @@ def respostas_do_supervisor(
         resposta = {**resposta, "mensagem": MENSAGEM_NAO_ENTENDI}
 
     mensagem = str(resposta.get("mensagem") or "Não consegui responder agora.")
+    pede_confirmacao = resposta.get("status") == "confirmacao"
+    if pede_confirmacao and mensagem != USE_OS_BOTOES:
+        mensagem = _PEDE_PARA_DIGITAR.sub("", mensagem).strip() or USE_OS_BOTOES
     for pedaco in re.findall(r"\S+\s*|\s+", mensagem):
         yield _linha({"tipo": "token", "valor": pedaco})
 
@@ -113,6 +173,9 @@ def respostas_do_supervisor(
     # Pedido que o Supervisor ainda não faz (editar, excluir...): oferecer o painel manual.
     elif resposta.get("status") == "indisponivel" and resposta.get("acao") != "fora_escopo":
         yield _linha({"tipo": "sugerir_painel_manual"})
+
+    if pede_confirmacao:
+        yield _linha({"tipo": "pedir_confirmacao"})
 
     # O pedido chegou ao fim: o frontend encerra a conversa e a próxima mensagem
     # começa outra (o Supervisor não tem memória, então não há o que continuar).
@@ -144,6 +207,14 @@ def reiniciar_chat(request: Request) -> Response:
         with _lock:
             zerar_supervisor(supervisor)
     return Response(status_code=204)
+
+
+@router.post("/chat/confirmar")
+def chat_confirmar(corpo: ConfirmarChatRequest, request: Request) -> StreamingResponse:
+    return StreamingResponse(
+        respostas_da_confirmacao(_supervisor(request), corpo.confirmado),
+        media_type="application/x-ndjson",
+    )
 
 
 @router.post("/chat/stream")
