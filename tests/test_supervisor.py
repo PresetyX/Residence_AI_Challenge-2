@@ -172,6 +172,85 @@ def test_visualizar_eventos_marcados_pede_ocupados_e_omite_blocos_de_sono():
     )
 
 
+def test_visualizar_conflitos_mostra_intervalo_e_eventos_envolvidos():
+    inicio = datetime.fromisoformat(evento_teste()["inicio"])
+    fim = inicio + timedelta(hours=1)
+    evento_a = {
+        "id": "a",
+        "titulo": "Reunião",
+        "inicio": inicio.isoformat(),
+        "fim": (inicio + timedelta(hours=2)).isoformat(),
+        "tipo": "evento",
+    }
+    evento_b = {
+        "id": "b",
+        "titulo": "Aula",
+        "inicio": fim.isoformat(),
+        "fim": (fim + timedelta(hours=2)).isoformat(),
+        "tipo": "evento",
+    }
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {
+            "ocupados": [evento_a, evento_b],
+            "conflitos": [{
+                "ids_eventos": ["a", "b"],
+                "inicio_sobreposicao": fim.isoformat(),
+                "fim_sobreposicao": (inicio + timedelta(hours=2)).isoformat(),
+            }],
+        },
+    }
+    periodo_inicio = inicio.replace(hour=0, minute=0)
+    periodo_fim = periodo_inicio + timedelta(days=1)
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {
+                "inicio": periodo_inicio.isoformat(),
+                "fim": periodo_fim.isoformat(),
+                "tipo": "conflitos",
+            },
+        ),
+    )
+
+    resposta = supervisor.executar("Quais eventos estão em conflito amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Reunião e Aula" in resposta["mensagem"]
+    assert "das 11:00 às 12:00" in resposta["mensagem"]
+    assert resposta["dados"]["conflitos"][0]["eventos"] == [evento_a, evento_b]
+    visualizador.executar_json.assert_called_once_with(
+        {"inicio": periodo_inicio.isoformat(), "fim": periodo_fim.isoformat()},
+        incluir_ocupados=True,
+        incluir_conflitos=True,
+    )
+
+
+def test_visualizar_conflitos_informa_quando_nao_ha_sobreposicoes():
+    inicio = datetime.fromisoformat(evento_teste()["inicio"]).replace(hour=0, minute=0)
+    fim = inicio + timedelta(days=1)
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"ocupados": [], "conflitos": []},
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "tipo": "conflitos"},
+        ),
+    )
+
+    resposta = supervisor.executar("Tenho algum evento em conflito amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Não encontrei eventos em conflito" in resposta["mensagem"]
+    assert resposta["dados"] == {"conflitos": []}
+
+
 def test_consulta_do_planejador_mantem_visualizacao_de_horarios_livres():
     visualizador = MagicMock()
     visualizador.executar_json.return_value = {

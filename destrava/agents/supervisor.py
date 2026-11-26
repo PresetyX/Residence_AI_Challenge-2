@@ -94,6 +94,57 @@ def _formatar_eventos(resposta: dict) -> tuple[str, list[dict]]:
     return "\n".join(linhas), eventos
 
 
+def _formatar_conflitos(resposta: dict) -> tuple[str, list[dict]]:
+    dados = resposta.get("dados")
+    if not isinstance(dados, dict):
+        raise ValueError("O Visualizar não retornou dados válidos.")
+    conflitos = dados.get("conflitos")
+    ocupados = dados.get("ocupados")
+    if not isinstance(conflitos, list) or not isinstance(ocupados, list):
+        raise ValueError("O Visualizar não retornou conflitos e eventos válidos.")
+
+    eventos_por_id = {
+        evento["id"]: evento
+        for evento in ocupados
+        if isinstance(evento, dict)
+        and evento.get("tipo") in ("evento", "dia_inteiro")
+        and isinstance(evento.get("id"), str)
+    }
+    if not conflitos:
+        return "Não encontrei eventos em conflito no período consultado.", []
+
+    linhas = ["Eventos em conflito no período:"]
+    conflitos_formatados = []
+    for conflito in conflitos:
+        if not isinstance(conflito, dict):
+            raise ValueError("O Visualizar retornou um conflito inválido.")
+        ids = conflito.get("ids_eventos")
+        if not isinstance(ids, list) or len(ids) < 2:
+            raise ValueError("O Visualizar retornou IDs de conflito inválidos.")
+
+        envolvidos = []
+        for id_evento in ids:
+            evento = eventos_por_id.get(id_evento)
+            if evento is None:
+                raise ValueError("Não foi possível identificar todos os eventos em conflito.")
+            envolvidos.append(evento)
+
+        inicio = datetime.fromisoformat(conflito["inicio_sobreposicao"])
+        fim = datetime.fromisoformat(conflito["fim_sobreposicao"])
+        nomes = " e ".join(evento.get("titulo") or "Evento sem título" for evento in envolvidos)
+        if inicio.date() == fim.date():
+            intervalo = f"{inicio:%d/%m/%Y}, das {inicio:%H:%M} às {fim:%H:%M}"
+        else:
+            intervalo = f"{inicio:%d/%m/%Y %H:%M} até {fim:%d/%m/%Y %H:%M}"
+        linhas.append(f"- {nomes}: sobreposição {intervalo}")
+        conflitos_formatados.append({
+            "inicio_sobreposicao": inicio.isoformat(),
+            "fim_sobreposicao": fim.isoformat(),
+            "eventos": envolvidos,
+        })
+    return "\n".join(linhas), conflitos_formatados
+
+
 def _normalizar(texto: str) -> str:
     """Apenas para identificar datas/horários escritos pelo estudante."""
     letras = unicodedata.normalize("NFD", texto.casefold())
@@ -864,8 +915,8 @@ class AgenteSupervisor:
                 ):
                     raise ValueError("Informe início e fim.")
                 tipo = dados.get("tipo", "livres")
-                if tipo not in ("livres", "eventos"):
-                    raise ValueError("Escolha entre consultar horários livres ou eventos marcados.")
+                if tipo not in ("livres", "eventos", "conflitos"):
+                    raise ValueError("Escolha entre consultar horários livres, eventos marcados ou conflitos.")
                 periodo = PedidoVisualizacao.model_validate(
                     {"inicio": dados["inicio"], "fim": dados["fim"]}
                 )
@@ -875,6 +926,10 @@ class AgenteSupervisor:
                 entrada = periodo.model_dump(mode="json")
                 if tipo == "eventos":
                     resposta = self.visualizador.executar_json(entrada, incluir_ocupados=True)
+                elif tipo == "conflitos":
+                    resposta = self.visualizador.executar_json(
+                        entrada, incluir_ocupados=True, incluir_conflitos=True
+                    )
                 else:
                     resposta = self.visualizador.executar_json(entrada)
             except Exception as erro:
@@ -888,6 +943,10 @@ class AgenteSupervisor:
                     mensagem, eventos = _formatar_eventos(resposta)
                     return {"status": "sucesso", "acao": "visualizar",
                             "mensagem": mensagem, "dados": {"eventos": eventos}}
+                if tipo == "conflitos":
+                    mensagem, conflitos = _formatar_conflitos(resposta)
+                    return {"status": "sucesso", "acao": "visualizar",
+                            "mensagem": mensagem, "dados": {"conflitos": conflitos}}
                 return {"status": "sucesso", "acao": "visualizar",
                         "mensagem": _formatar_horarios(resposta), "dados": resposta["dados"]}
             except (KeyError, TypeError, ValueError) as erro:

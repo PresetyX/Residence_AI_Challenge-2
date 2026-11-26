@@ -10,7 +10,7 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 
 | Pedido | Ação (`acao`) | O que acontece |
 |---|---|---|
-| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?") | `visualizar` | Escolhe horários livres ou eventos marcados conforme o pedido |
+| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?" / "há conflitos?") | `visualizar` | Escolhe horários livres, eventos marcados ou sobreposições conforme o pedido |
 | Criar um evento | `criar` | Valida título, data e horário, confere que o horário está livre e fora do sono, e pede confirmação. Com o "sim", chama o agente Criar |
 | Editar um evento | `editar` | Localiza pelo título e data originais; se houver um único resultado, mostra as alterações e pede confirmação antes de chamar Editar |
 | Excluir um evento | `excluir` | Localiza pelo título e data originais; se houver um único resultado, pede confirmação antes de chamar Excluir |
@@ -18,7 +18,7 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 | Pedido incompleto | `esclarecer` | Devolve uma pergunta ao usuário |
 | Fora do escopo | `fora_escopo` | O chat responde com o "não entendi" do Planejador e a próxima mensagem vai para ele |
 
-O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente`, `operacao_pendente` ou `cronograma_pendente`). Edição e exclusão exigem título e data de início originais; se houver mais de um evento com o mesmo título na data, o usuário informa também o horário de início. Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.
+O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente`, `operacao_pendente` ou `cronograma_pendente`). Edição e exclusão exigem título e data de início originais; se houver mais de um evento com o mesmo título na data, o usuário informa também o horário de início. Para visualizar conflitos, ele lista os eventos envolvidos e o intervalo de sobreposição. Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.
 
 ## Resposta
 

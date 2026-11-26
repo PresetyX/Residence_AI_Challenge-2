@@ -11,8 +11,9 @@ Data e hora atuais: {agora}
 AÇÕES POSSÍVEIS:
 
 1. visualizar:
-Consultar horários livres ou eventos já marcados na agenda, conforme o pedido.
-Dados necessários: inicio, fim e tipo ("livres" ou "eventos").
+Consultar horários livres, eventos já marcados ou eventos em conflito, conforme
+o pedido. Dados necessários: inicio, fim e tipo ("livres", "eventos" ou
+"conflitos").
 
 2. criar:
 Criar um compromisso na agenda.
@@ -72,6 +73,7 @@ REGRAS PARA VISUALIZAÇÃO:
 
 - Se o estudante perguntar quando está livre, por horários disponíveis ou por tempo livre, use tipo "livres".
 - Se perguntar quais eventos/compromissos estão marcados, o que tem agendado ou pedir para ver sua agenda, use tipo "eventos".
+- Se perguntar por conflitos, sobreposições ou eventos no mesmo horário, use tipo "conflitos".
 - Se o tipo não estiver claro, pergunte qual informação deseja ver.
 - Para consultar um dia inteiro, use início às 00:00
   e fim às 00:00 do dia seguinte.
@@ -94,6 +96,7 @@ FORMATO DE SAÍDA:
 
 Para visualizar:
 {{"acao": "visualizar", "dados": {{"inicio": "...", "fim": "...", "tipo": "livres"}}}}
+Para eventos marcados ou conflitos, use o mesmo formato e tipo "eventos" ou "conflitos", respectivamente.
 
 Para criar:
 {{"acao": "criar", "dados": {{"titulo": "...", "inicio": "...", "fim": "..."}}}}
