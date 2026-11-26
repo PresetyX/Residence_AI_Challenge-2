@@ -92,3 +92,76 @@ def test_google_recebe_a_mesma_descricao_sem_chamada_real():
     kwargs = servico.events.return_value.insert.call_args.kwargs
     assert kwargs["calendarId"] == "primary"
     assert kwargs["body"]["description"] == eventos[0]["descricao"]
+
+def test_tarefa_sem_dependencia():
+    tarefas = [
+        {
+            "etapa": 1,
+            "titulo": "Desenvolver interface",
+            "dependencia": 0,
+            "story_points": 1
+        }
+    ]
+
+    eventos, _ = encaixar_tarefas_pomodoro(
+        tarefas, _horarios_livres()
+    )
+
+    assert "Dependência: Nenhuma." in eventos[0]["descricao"]
+
+def test_dependencia_com_titulo():
+    tarefas = [
+        {
+            "etapa": 1,
+            "titulo": "Desenvolver interface",
+            "dependencia": 0,
+            "story_points": 1
+        },
+        {
+            "etapa": 2,
+            "titulo": "Implementar login",
+            "dependencia": 1,
+            "story_points": 1
+        }
+    ]
+
+    eventos, _ = encaixar_tarefas_pomodoro(
+        tarefas, _horarios_livres()
+    )
+
+    assert (
+        "Dependência: Etapa 1 — Desenvolver interface"
+        in eventos[1]["descricao"]
+    )
+def test_dependencia_nao_informada():
+    tarefas = [
+        {
+            "etapa": 1,
+            "titulo": "Implementar login",
+            "story_points": 1
+        }
+    ]
+
+    eventos, _ = encaixar_tarefas_pomodoro(
+        tarefas, _horarios_livres()
+    )
+
+    assert "Dependência: Não informada." in eventos[0]["descricao"]
+def test_dependencia_nao_encontrada():
+    tarefas = [
+        {
+            "etapa": 2,
+            "titulo": "Implementar login",
+            "dependencia": 1,
+            "story_points": 1
+        }
+    ]
+
+    eventos, _ = encaixar_tarefas_pomodoro(
+        tarefas, _horarios_livres()
+    )
+
+    assert (
+        "Dependência: Etapa 1 (título não encontrado)"
+        in eventos[0]["descricao"]
+    )

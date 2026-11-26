@@ -64,14 +64,16 @@ def _janelas_acordadas(livres: list[dict], agora: datetime) -> list[list[datetim
     return unidas
 
 
-def _descricao_planejamento(tarefa: dict, minutos_trabalho: int) -> str:
-    """Monta a parte descritiva do evento com dados reais do Planejador.
+def _descricao_planejamento(
+    tarefa: dict,
+    minutos_trabalho: int,
+    titulos_por_etapa: dict
+) -> str:
+    """Monta a descrição do evento com os dados do Planejador."""
 
-    Campos opcionais ausentes nao sao inventados. A estimativa vem do
-    calculo efetivamente usado pelo encaixe (story points x 60, ou padrao).
-    """
     titulo = tarefa["titulo"].strip()
     etapa = tarefa.get("etapa")
+
     if isinstance(etapa, int) and not isinstance(etapa, bool) and etapa >= 0:
         linhas = [f"Etapa {etapa} — {titulo}"]
     else:
@@ -82,10 +84,31 @@ def _descricao_planejamento(tarefa: dict, minutos_trabalho: int) -> str:
         ("entregaveis", "Entregáveis"),
         ("demonstracao", "Demonstração"),
     )
+
     for chave, rotulo in campos:
         valor = tarefa.get(chave)
         if isinstance(valor, str) and valor.strip():
             linhas.append(f"{rotulo}: {valor.strip()}")
+
+    dependencia = tarefa.get("dependencia")
+
+    if dependencia is None:
+        linhas.append("Dependência: Não informada.")
+
+    elif dependencia == 0:
+        linhas.append("Dependência: Nenhuma.")
+
+    else:
+        titulo_dependencia = titulos_por_etapa.get(dependencia)
+
+        if titulo_dependencia:
+            linhas.append(
+                f"Dependência: Etapa {dependencia} — {titulo_dependencia}"
+            )
+        else:
+            linhas.append(
+                f"Dependência: Etapa {dependencia} (título não encontrado)"
+            )
 
     linhas.append(f"Trabalho estimado: {minutos_trabalho} minutos.")
     return "\n".join(linhas)
@@ -174,6 +197,12 @@ def encaixar_tarefas_pomodoro(
     eventos: list[dict] = []
     detalhes: list[dict] = []
 
+    titulos_por_etapa = {
+    tarefa["etapa"]: tarefa["titulo"]
+    for tarefa in tarefas
+    if "etapa" in tarefa
+}
+
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
         story_points = tarefa.get("story_points")
@@ -231,7 +260,7 @@ def encaixar_tarefas_pomodoro(
             titulo = f"[Destrava] {titulo_tarefa}{sufixo_parte}"
             if usar_pomodoro:
                 titulo += " (Pomodoro)"
-            descricao = _descricao_planejamento(tarefa, trabalho_total)
+            descricao = _descricao_planejamento(tarefa, trabalho_total, titulos_por_etapa)
             if qtd_partes > 1:
                 descricao += (
                     f"\nParte {numero}/{qtd_partes}: {parte['foco']} minutos de trabalho nesta parte."
