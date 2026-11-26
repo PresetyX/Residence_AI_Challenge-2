@@ -10,13 +10,13 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 
 | Pedido | Ação (`acao`) | O que acontece |
 |---|---|---|
-| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?" / "há conflitos?") | `visualizar` | Escolhe horários livres, eventos marcados ou sobreposições conforme o pedido |
-| Criar um evento | `criar` | Valida título, data e horário, confere que o horário está livre e fora do sono, e pede confirmação. Com o "sim", chama o agente Criar |
+| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?" / "há conflitos?") | `visualizar` | Escolhe horários livres, eventos marcados ou sobreposições conforme o pedido; uma data sem horário consulta o dia inteiro |
+| Criar um evento | `criar` | A LLM interpreta o pedido; o código valida os dados, data futura, sono e disponibilidade, e pede confirmação antes de chamar Criar |
 | Editar um evento | `editar` | Localiza pelo título e data originais; se houver um único resultado, mostra as alterações e pede confirmação antes de chamar Editar |
 | Excluir um evento | `excluir` | Localiza pelo título e data originais; se houver um único resultado, pede confirmação antes de chamar Excluir |
 | Agendar o plano de um projeto | `planejar` | Feito pelas rotas `POST /projetos/agendar` e `/confirmar` (abaixo), não pelo texto do chat |
 | Pedido incompleto | `esclarecer` | Devolve uma pergunta ao usuário |
-| Fora do escopo | `fora_escopo` | O chat responde com o "não entendi" do Planejador e a próxima mensagem vai para ele |
+| Fora do escopo | `fora_escopo` | O Supervisor responde "Não entendi. Você quer criar um evento, visualizar sua agenda ou planejar um projeto?" e a próxima mensagem segue o roteamento normal |
 
 O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente`, `operacao_pendente` ou `cronograma_pendente`). Edição e exclusão exigem título e data de início originais; se houver mais de um evento com o mesmo título na data, o usuário informa também o horário de início. Para visualizar conflitos, ele lista os eventos envolvidos e o intervalo de sobreposição. Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.
 
@@ -71,4 +71,4 @@ Os testes simulam o Google e o Ollama. Scripts manuais (precisam do Ollama): `py
 
 - Não guarda histórico nem mais de uma confirmação pendente.
 - Edição e exclusão localizam pelo título e data informados; correspondências incertas pedem esclarecimento, nunca executam automaticamente.
-- O LLM pequeno pode errar a interpretação: por isso o Supervisor valida os dados (`PedidoCriacao`, data futura, horário de sono) e sempre pede confirmação antes de criar.
+- O LLM pequeno pode errar a interpretação: depois da interpretação, o Supervisor valida por código (`PedidoCriacao`, data futura, horário de sono e agenda livre) e sempre pede confirmação antes de criar.

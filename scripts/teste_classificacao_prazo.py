@@ -36,7 +36,7 @@ def main():
     ]
     for minutos, esperado, duracao_esperada in cenarios:
         supervisor, criador = montar_supervisor(minutos)
-        resposta = supervisor.preparar_agendamento("Site", "2099-12-31")
+        resposta = supervisor.preparar_agendamento("2099-12-31")
         assert resposta["classificacao"] == esperado, resposta
         if esperado == "impossivel":
             assert resposta["status"] == "erro"

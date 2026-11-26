@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import backend.chat as chat
+import backend.main as main
+from backend.database import buscar_storypoints_evento
 from destrava.agents.supervisor import AgenteSupervisor
 from destrava.core import config
 
@@ -42,6 +44,8 @@ def _cliente(livres):
     supervisor = AgenteSupervisor(visualizador=VisualizadorFalso(livres), criador=criador)
     supervisor.verificar_disponibilidade = lambda evento: True
     app.state.supervisor = supervisor
+    app.post("/projetos/agendar")(main.agendar_projeto)
+    app.post("/projetos/agendar/confirmar")(main.confirmar_agendamento)
     return TestClient(app), criador
 
 
@@ -54,11 +58,11 @@ def _prazo():
     return (datetime.now(config.FUSO) + timedelta(days=3)).date().isoformat()
 
 
-def test_prevê_classifica_e_cria_com_a_meta():
+def test_prevê_classifica_e_cria():
     cliente, criador = _cliente([{"inicio": _amanha(8), "fim": _amanha(18), "duracao_minutos": 600}])
     previa = cliente.post(
         "/projetos/agendar",
-        json={"projeto": "App de tarefas", "prazo": _prazo(), "tarefas": TAREFAS, "meta": "App de tarefas"},
+        json={"prazo": _prazo(), "tarefas": TAREFAS},
     ).json()
     assert previa["status"] == "confirmacao"
     assert previa["classificacao"] in ("tranquilo", "corrido")
@@ -67,8 +71,10 @@ def test_prevê_classifica_e_cria_com_a_meta():
 
     resultado = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()
     assert resultado["status"] == "sucesso"
-    assert [e["meta"] for e in resultado["dados"]["eventos_criados"]] == ["App de tarefas"] * 2
     assert len(criador.criados) == 2
+    assert buscar_storypoints_evento("e1") == 5
+    assert buscar_storypoints_evento("e2") == 3
+    assert [evento["story_points"] for evento in resultado["dados"]["eventos_criados"]] == [5, 3]
 
     # Outro "sim" não repete a criação.
     de_novo = cliente.post("/projetos/agendar/confirmar", json={"confirmado": True}).json()
@@ -79,7 +85,7 @@ def test_prevê_classifica_e_cria_com_a_meta():
 def test_sem_horario_livre_o_prazo_e_impossivel():
     cliente, criador = _cliente([])
     previa = cliente.post(
-        "/projetos/agendar", json={"projeto": "App", "prazo": _prazo(), "tarefas": TAREFAS}
+        "/projetos/agendar", json={"prazo": _prazo(), "tarefas": TAREFAS}
     ).json()
     assert previa["status"] == "erro"
     assert previa["classificacao"] == "impossivel"
@@ -88,7 +94,7 @@ def test_sem_horario_livre_o_prazo_e_impossivel():
 
 def test_cancelar_nao_cria_nada():
     cliente, criador = _cliente([{"inicio": _amanha(8), "fim": _amanha(18), "duracao_minutos": 600}])
-    cliente.post("/projetos/agendar", json={"projeto": "App", "prazo": _prazo(), "tarefas": TAREFAS})
+    cliente.post("/projetos/agendar", json={"prazo": _prazo(), "tarefas": TAREFAS})
     resultado = cliente.post("/projetos/agendar/confirmar", json={"confirmado": False}).json()
     assert resultado["status"] == "cancelado"
     assert criador.criados == []

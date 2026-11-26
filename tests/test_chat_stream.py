@@ -87,16 +87,28 @@ def test_funcao_indisponivel_sugere_painel_manual():
     assert linhas[-1] == {"tipo": "sugerir_painel_manual"}
 
 
-def test_fora_do_escopo_responde_como_o_planejador_e_pede_o_projeto():
+def test_planejar_responde_como_o_planejador_e_pede_o_projeto():
     from destrava.agents.planejador import MENSAGEM_NAO_ENTENDI
 
-    for acao, pedido in (("fora_escopo", "banana com azeite"), ("planejar", "planeje")):
-        linhas = _conversar(_cliente(SupervisorFalso(
-            {"status": "indisponivel", "acao": acao, "mensagem": "Posso ajudar com a agenda."}
-        )), ("usuario", pedido))
-        assert _texto(linhas) == MENSAGEM_NAO_ENTENDI
-        assert linhas[-1] == {"tipo": "pedir_projeto"}
-        assert {"tipo": "sugerir_painel_manual"} not in linhas
+    linhas = _conversar(_cliente(SupervisorFalso(
+        {"status": "indisponivel", "acao": "planejar", "mensagem": "Posso ajudar com a agenda."}
+    )), ("usuario", "planeje"))
+    assert _texto(linhas) == MENSAGEM_NAO_ENTENDI
+    assert linhas[-1] == {"tipo": "pedir_projeto"}
+    assert {"tipo": "sugerir_painel_manual"} not in linhas
+
+
+def test_fora_do_escopo_fica_no_supervisor():
+    from destrava.agents.supervisor import AgenteSupervisor
+
+    mensagem = AgenteSupervisor._indisponivel("fora_escopo")["mensagem"]
+    linhas = _conversar(_cliente(SupervisorFalso(
+        {"status": "indisponivel", "acao": "fora_escopo", "mensagem": mensagem}
+    )), ("usuario", "Me chamo leonardo"))
+    assert _texto(linhas) == mensagem
+    assert mensagem.startswith("Não entendi.")
+    assert {"tipo": "pedir_projeto"} not in linhas
+    assert {"tipo": "sugerir_painel_manual"} not in linhas
 
 
 def test_excecao_no_supervisor_vira_mensagem_e_nao_derruba_o_stream():

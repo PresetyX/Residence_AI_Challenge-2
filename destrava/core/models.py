@@ -8,7 +8,7 @@ Todas as datas são datetime com fuso horário (config.FUSO).
 from datetime import datetime, timedelta
 from typing import Any, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from destrava.core import config
 
@@ -53,6 +53,8 @@ class PedidoVisualizacao(BaseModel):
 
     inicio: datetime
     fim: datetime
+    # Menor lacuna devolvida como livre. Ausente: config.DURACAO_MINIMA_LIVRE.
+    duracao_minima_minutos: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _fim_depois_inicio(self):

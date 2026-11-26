@@ -73,7 +73,7 @@ def test_prompt_renderiza_com_o_json_de_exemplo():
     )[0].content
 
     assert '"etapa": 1' in texto
-    assert '"story_points": 1' in texto
+    assert '"story_points": 5' in texto
     assert "{{" not in texto
     assert "CTX" in texto and "ENT" in texto
 

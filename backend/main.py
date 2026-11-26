@@ -8,23 +8,30 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 from backend.calendario import router as calendario_router
-from backend.chat import router as chat_router
+from backend.chat import modelo_ollama, router as chat_router
 from backend import perfil
 from backend.story_points import ErroStoryPoints, EstimadorStoryPoints, criar_estimador
 from destrava.agents.planejador import AgentePlanejador, ErroPlanejador, PedidoNaoEntendido
+from destrava.agents.supervisor import AgenteSupervisor
 from destrava.tools.visualizar import AgenteVisualizar
 from destrava.core import config
 from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
+from backend.database import (
+    buscar_storypoints_evento,
+    inicializar_banco_eventos,
+    salvar_storypoints_eventos,
+)
 
 
 RAIZ_PROJETO = Path(__file__).resolve().parents[1]
 CAMINHO_HISTORICO = RAIZ_PROJETO / "data" / "historico.json"
 _LOCK_HISTORICO = Lock()
+_LOCK_AGENDAMENTO = Lock()
 _MEDIA_INICIAL = 30.0
 _QUANTIDADE_INICIAL = 5
 
@@ -68,6 +75,7 @@ def _carregar_historico() -> None:
 
 async def lifespan(app: FastAPI):
     _carregar_historico()
+    inicializar_banco_eventos()
     # Sono e calibração da última conta que entrou (data/perfis.json).
     perfil.ativar_conta_salva()
     # Com STORY_POINTS_URL definido, o estimador é só um cliente HTTP do
@@ -78,6 +86,11 @@ async def lifespan(app: FastAPI):
     print(f"Story points: modo {modo}. LLM: {config.MODELO} em {config.OLLAMA_URL}.")
     app.state.planejador = AgentePlanejador(rag=obter_rag("planejador"))
     app.state.visualizador = AgenteVisualizar()
+    app.state.supervisor = AgenteSupervisor(
+        visualizador=app.state.visualizador,
+        criador=None,
+        planejador=app.state.planejador,
+    )
     yield
 
 
@@ -123,6 +136,8 @@ class ProjetoRequest(BaseModel):
     # "tenho uma semana", "20/12"...). Sem prazo nenhum, o plano sai assim mesmo
     # e a resposta traz precisa_prazo=True.
     prazo: str | None = None
+    # Id do seletor de modelo do chat. Sem ele, o Planejador usa config.MODELO.
+    modelo: str | None = None
 
     @field_validator("texto")
     @classmethod
@@ -172,10 +187,18 @@ def interpretar_prazo_do_texto(corpo: InterpretarPrazoRequest) -> dict[str, str 
 class HistoricoTarefaRequest(BaseModel):
     model_config = ConfigDict(strict=True)
 
-    story_points: int
+    id_evento: str
     tempo_real_minutos: int
 
-    @field_validator("story_points", "tempo_real_minutos")
+    @field_validator("id_evento")
+    @classmethod
+    def validar_id_evento(cls, id_evento: str) -> str:
+        id_evento = id_evento.strip()
+        if not id_evento:
+            raise ValueError("O id do evento não pode ser vazio.")
+        return id_evento
+
+    @field_validator("tempo_real_minutos")
     @classmethod
     def validar_valor_nao_negativo(cls, valor: int) -> int:
         if valor < 0:
@@ -204,6 +227,41 @@ class PerguntasCalibracaoResponse(BaseModel):
     perguntas: list[dict[str, str]]
 
 
+class AgendarProjetoRequest(BaseModel):
+    prazo: str
+    tarefas: list[dict] = Field(min_length=1)
+
+
+class ConfirmarAgendamentoRequest(BaseModel):
+    confirmado: bool
+
+
+@app.post("/projetos/agendar")
+def agendar_projeto(
+    corpo: AgendarProjetoRequest,
+    request: Request,
+) -> dict:
+    supervisor: AgenteSupervisor = request.app.state.supervisor
+    with _LOCK_AGENDAMENTO:
+        supervisor.evento_pendente = None
+        return supervisor.preparar_agendamento(corpo.prazo, corpo.tarefas)
+
+
+@app.post("/projetos/agendar/confirmar")
+def confirmar_agendamento(
+    corpo: ConfirmarAgendamentoRequest,
+    request: Request,
+) -> dict:
+    supervisor: AgenteSupervisor = request.app.state.supervisor
+    with _LOCK_AGENDAMENTO:
+        resultado = supervisor.confirmar_agendamento(corpo.confirmado)
+
+        dados = resultado.get("dados")
+        eventos_criados = dados.get("eventos_criados", []) if isinstance(dados, dict) else []
+        salvar_storypoints_eventos(eventos_criados)
+        return resultado
+
+
 @app.post("/projetos")
 def criar_projeto(
     projeto: ProjetoRequest,
@@ -216,7 +274,8 @@ def criar_projeto(
     print("Planejando projeto: ", projeto.texto, "com prazo", prazo or "(não informado)", "...")
     planejador: AgentePlanejador = request.app.state.planejador
     try:
-        plano = planejador.executar(projeto.texto, prazo_planejamento)
+        opcoes = {"modelo": modelo_ollama(projeto.modelo)} if projeto.modelo else {}
+        plano = planejador.executar(projeto.texto, prazo_planejamento, **opcoes)
     except PedidoNaoEntendido as erro:
         # A IA não entendeu o projeto: o frontend mostra a pergunta e espera
         # mais detalhes (mesmo prazo).
@@ -269,7 +328,13 @@ def criar_projeto(
 def registrar_historico(
     historico: HistoricoTarefaRequest,
 ) -> dict[str, str]:
-    if historico.story_points <= 0:
+    story_points = buscar_storypoints_evento(historico.id_evento)
+    if story_points is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Não existe um registro de story points para este evento.",
+        )
+    if story_points <= 0:
         raise HTTPException(
             status_code=422,
             detail="Os story points devem ser maiores que zero para compor a média.",
@@ -277,7 +342,7 @@ def registrar_historico(
 
     global media_minutos_por_story_point, _quantidade_observacoes_media
     with _LOCK_HISTORICO:
-        fator_tarefa = historico.tempo_real_minutos / historico.story_points
+        fator_tarefa = historico.tempo_real_minutos / story_points
         total_observacoes = _quantidade_observacoes_media + 1
         media_minutos_por_story_point = (
             media_minutos_por_story_point * _quantidade_observacoes_media
@@ -285,6 +350,8 @@ def registrar_historico(
         ) / total_observacoes
         _quantidade_observacoes_media = total_observacoes
         _salvar_historico()
+
+    print(f"Nova média de minutos por story point: {media_minutos_por_story_point:.2f}")
 
     return {"status": "sucesso"}
 

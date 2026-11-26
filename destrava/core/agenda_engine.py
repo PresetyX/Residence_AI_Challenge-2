@@ -264,6 +264,7 @@ def montar_visualizacao(
     eventos: list[dict],
     inicio: datetime,
     fim: datetime,
+    duracao_minima: timedelta | None = None,
 ) -> Visualizacao:
     """Calcula ocupados, livres e conflitos de um período.
 
@@ -272,6 +273,8 @@ def montar_visualizacao(
             (id, titulo, inicio, fim e, opcionalmente, tipo).
         inicio: começo do período.
         fim: fim do período.
+        duracao_minima: menor lacuna que conta como livre. Padrão:
+            config.DURACAO_MINIMA_LIVRE.
 
     Returns:
         Visualizacao com:
@@ -329,7 +332,8 @@ def montar_visualizacao(
 
     # 6. Horários livres e conflitos (o sono e os dias inteiros não geram conflito).
     livres = calcular_horarios_livres(
-        eventos_que_bloqueiam + blocos_sono, inicio, fim
+        eventos_que_bloqueiam + blocos_sono, inicio, fim,
+        config.DURACAO_MINIMA_LIVRE if duracao_minima is None else duracao_minima,
     )
     conflitos = encontrar_conflitos(eventos_que_bloqueiam)
 

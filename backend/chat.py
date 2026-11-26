@@ -7,7 +7,7 @@ Contrato (frontend/src/services/inference-service.ts):
         {"tipo": "token", "valor": "..."}             pedaço do texto da resposta
         {"tipo": "acao_agenda", "acao": "created" | "updated" | "deleted", "evento": {...}}
         {"tipo": "sugerir_painel_manual"}             a IA não fez o pedido; oferecer o painel
-        {"tipo": "pedir_projeto"}                     fora do escopo: a próxima mensagem vai ao Planejador
+        {"tipo": "pedir_projeto"}                     pedido de plano: a próxima mensagem vai ao Planejador
         {"tipo": "fim_conversa"}                      pedido concluído: a próxima mensagem abre outra conversa
 
 POST /chat/reiniciar zera as confirmações pendentes do Supervisor (nova conversa).
@@ -101,10 +101,11 @@ def respostas_do_supervisor(
         except Exception as erro:  # o Supervisor não deveria lançar, mas não derrube o stream
             resposta = {"status": "erro", "acao": "interpretar", "mensagem": f"Falha no Supervisor: {erro}"}
 
-    # Fora do escopo da agenda (ex.: "banana com azeite") ou pedido de plano que o
-    # Supervisor não encaminha: responde como o Planejador, pedindo o projeto. O
-    # frontend manda a próxima mensagem para o Planejador ("pedir_projeto").
-    pede_projeto = resposta.get("status") == "indisponivel" and resposta.get("acao") in ("fora_escopo", "planejar")
+    # Pedido de plano que o Supervisor não encaminha: responde como o Planejador,
+    # pedindo o projeto, e o frontend manda a próxima mensagem para ele
+    # ("pedir_projeto"). Fora do escopo ("Me chamo Leonardo") fica no Supervisor,
+    # que responde com as opções (criar evento, ver agenda, planejar projeto).
+    pede_projeto = resposta.get("status") == "indisponivel" and resposta.get("acao") == "planejar"
     if pede_projeto:
         resposta = {**resposta, "mensagem": MENSAGEM_NAO_ENTENDI}
 
@@ -117,8 +118,8 @@ def respostas_do_supervisor(
 
     if pede_projeto:
         yield _linha({"tipo": "pedir_projeto"})
-    # Pedido que o Supervisor ainda não encaminha: oferecer o painel manual.
-    elif resposta.get("status") == "indisponivel":
+    # Pedidos não encaminhados pelo Supervisor (exceto fora do escopo): oferecer o painel manual.
+    elif resposta.get("status") == "indisponivel" and resposta.get("acao") != "fora_escopo":
         yield _linha({"tipo": "sugerir_painel_manual"})
 
     # O pedido chegou ao fim: o frontend encerra a conversa e a próxima mensagem
@@ -165,48 +166,3 @@ def chat_stream(corpo: ChatRequest, request: Request) -> StreamingResponse:
         respostas_do_supervisor(supervisor, pedido, modelo_ollama(corpo.modelo)),
         media_type="application/x-ndjson",
     )
-
-
-# ---------------------------------------------------------------------------
-# Agendamento de um plano do Planejador (POST /projetos) na agenda.
-#
-#   POST /projetos/agendar {projeto, prazo, tarefas, meta?}
-#       -> Supervisor.preparar_agendamento: classifica o prazo (tranquilo,
-#          corrido, impossivel) e devolve a prévia dos eventos, sem criar nada.
-#   POST /projetos/agendar/confirmar {confirmado}
-#       -> Supervisor.confirmar_agendamento: cria os eventos da prévia.
-# ---------------------------------------------------------------------------
-
-
-class AgendarRequest(BaseModel):
-    projeto: str
-    prazo: str
-    tarefas: list[dict] = Field(min_length=1)
-    # Meta do plano (frontend: planGoal), gravada em cada evento criado.
-    meta: str | None = None
-
-
-class ConfirmarRequest(BaseModel):
-    confirmado: bool
-
-
-@router.post("/projetos/agendar")
-def agendar_projeto(corpo: AgendarRequest, request: Request) -> dict:
-    supervisor = _supervisor(request)
-    with _lock:
-        # Um plano novo substitui um evento avulso que estava esperando "sim".
-        supervisor.evento_pendente = None
-        supervisor.operacao_pendente = None
-        resposta = supervisor.preparar_agendamento(corpo.projeto, corpo.prazo, corpo.tarefas)
-        if resposta.get("status") == "confirmacao" and corpo.meta:
-            for evento in supervisor.cronograma_pendente or []:
-                evento["meta"] = corpo.meta
-    return resposta
-
-
-@router.post("/projetos/agendar/confirmar")
-def confirmar_agendamento(corpo: ConfirmarRequest, request: Request) -> dict:
-    supervisor = _supervisor(request)
-    with _lock:
-        # Os eventos criados voltam com a "meta" (o agente criar a devolve).
-        return supervisor.confirmar_agendamento(corpo.confirmado)

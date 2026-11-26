@@ -176,6 +176,9 @@ def encaixar_tarefas_pomodoro(
 
     for tarefa in tarefas:
         titulo_tarefa = tarefa["titulo"]
+        story_points = tarefa.get("story_points")
+        if not isinstance(story_points, int):
+            story_points = 0
         trabalho_total = minutos_de_trabalho(tarefa)
         trabalho_restante = trabalho_total
         partes: list[dict] = []
@@ -249,6 +252,7 @@ def encaixar_tarefas_pomodoro(
                 "inicio": parte["inicio"].isoformat(),
                 "fim": parte["fim"].isoformat(),
                 "descricao": descricao,
+                "story_points": story_points,
             })
             if usar_pomodoro:
                 detalhes.append({"titulo": titulo, "sessoes": parte["sessoes"]})

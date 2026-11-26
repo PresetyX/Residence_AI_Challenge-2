@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 from destrava.core import config
 from destrava.core.encaixe_pomodoro import encaixar_tarefas_pomodoro
-from destrava.agents.criar import criar_evento_google
+from destrava.tools.criar import criar_evento_google
 
 
 def _horarios_livres():

@@ -22,7 +22,7 @@ O frontend só fala com esta API. Erros de validação voltam como `422`; as rot
 |---|---|
 | `POST /chat/stream` | Chat com o [Supervisor](supervisor.md). Entrada: `{"modelo", "sistema", "mensagens": [{"papel", "conteudo"}]}`. Saída: NDJSON |
 | `POST /chat/reiniciar` | Zera as confirmações pendentes (nova conversa) |
-| `POST /projetos/agendar` | `{projeto, prazo, tarefas, meta?}`: classifica o prazo e devolve a prévia, sem criar nada |
+| `POST /projetos/agendar` | `{prazo, tarefas}`: classifica o prazo e devolve a prévia, sem criar nada |
 | `POST /projetos/agendar/confirmar` | `{confirmado}`: cria os eventos da prévia (ou cancela) |
 
 Linhas do NDJSON de `/chat/stream`:
@@ -33,7 +33,7 @@ Linhas do NDJSON de `/chat/stream`:
 | `token` | Pedaço do texto da resposta |
 | `acao_agenda` | Evento criado (`acao: "created"` e o `evento`) |
 | `sugerir_painel_manual` | A IA não fez o pedido (ex.: editar ou excluir); oferecer o painel Agenda |
-| `pedir_projeto` | Fora do escopo: a próxima mensagem vai para o Planejador |
+| `pedir_projeto` | Pedido de plano sem projeto descrito: a próxima mensagem vai para o Planejador |
 | `fim_conversa` | Pedido concluído: a próxima mensagem abre outra conversa |
 
 ## Planejador e prazos (`backend/main.py`)
@@ -43,7 +43,7 @@ Linhas do NDJSON de `/chat/stream`:
 | `POST /projetos` | `{texto, prazo?}`: Planejador + story points ([`planejador.md`](planejador.md)). Erros: `422` (entrada ou prazo inválido, ou prazo que já passou), `502` (resposta da IA fora do contrato), `503` (Ollama ou serviço de story points fora do ar) |
 | `POST /prazos/interpretar` | Lê um prazo escrito em texto ("até amanhã", "20/12") |
 | `GET /tarefas` | Compromissos da agenda em uma janela (`inicio`, `fim`) |
-| `POST /historico` | Registra o tempo real de uma tarefa concluída (`story_points`, `tempo_real_minutos`) na média histórica (`data/historico.json`) |
+| `POST /historico` | Registra o tempo real de uma tarefa concluída (`id_evento`, `tempo_real_minutos`) na média histórica (`data/historico.json`). Os story points são buscados em `data/eventos.db`, tabela `eventos` |
 | `GET /calibracao`, `POST /calibracao` | As 10 tarefas da calibração e o envio dos tempos (ver README) |
 
 ## Perfil (`backend/perfil.py`)
