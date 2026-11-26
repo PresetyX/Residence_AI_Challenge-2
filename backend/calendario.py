@@ -205,7 +205,7 @@ def concluir(id_evento: str, corpo: ConcluirRequest, request: Request) -> dict:
     """Marca uma etapa do plano como concluída, com o tempo que o estudante gastou.
 
     O evento continua na agenda. O tempo informado também entra na média de
-    minutos por story point (a mesma de POST /historico).
+    minutos por story point.
     """
     servico = _servico()
     try:

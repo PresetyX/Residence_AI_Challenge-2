@@ -172,15 +172,10 @@ curl -X POST http://127.0.0.1:8000/calibracao `
   -d '[30, 70, null, 80, 50, 100, 60, 10, 40, 130]'
 ```
 
-Ao registrar uma tarefa concluída com `POST /historico`, o tempo real atualiza
-a média histórica em `data/historico.json`. Os story points associados aos
-eventos do plano são registrados separadamente em `data/eventos.db`:
-
-```
-curl -X POST http://127.0.0.1:8000/historico `
-  -H "Content-Type: application/json" `
-  -d '{"id_evento": "id-do-evento", "tempo_real_minutos": 5}'
-```
+Ao concluir uma etapa do plano pelo painel, o frontend chama
+`POST /calendar/events/{id}/concluir` com `{"tempo_gasto_minutos": 90}`. O evento
+é marcado como concluído no Google Agenda e o tempo informado atualiza a média
+em `data/historico.json` quando há story points associados em `data/eventos.db`.
 
 ### 1. CLI: visualizar, criar e planejador
 
@@ -412,7 +407,7 @@ O índice do RAG (Chroma) é gerado na primeira execução com os embeddings do 
 
 ```
 backend/
-├── main.py                    API FastAPI: projetos, prazos, agendamento de planos, histórico, tarefas e calibração
+├── main.py                    API FastAPI: projetos, prazos, agendamento de planos e calibração
 ├── chat.py                    /chat/stream e /chat/confirmar (Supervisor, NDJSON); reinício de conversa
 ├── calendario.py              login Google e CRUD de eventos (/auth/*, /calendar/events)
 ├── perfil.py                  perfil da conta: sono e calibração dos story points (/perfil)

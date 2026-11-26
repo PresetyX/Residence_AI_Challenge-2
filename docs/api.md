@@ -15,12 +15,12 @@ O frontend só fala com esta API. Erros de validação voltam como `422`; as rot
 | `POST /calendar/events` | Cria (agente [Criar](criar.md)) |
 | `PUT /calendar/events/{id}` | Edita (agente [Editar](editar.md)) |
 | `DELETE /calendar/events/{id}` | Exclui (agente [Excluir](excluir.md)) |
+| `POST /calendar/events/{id}/concluir` | Marca uma etapa do plano como concluída. Entrada: `{"tempo_gasto_minutos": 1 a 1440}`. O tempo entra na média de minutos por story point |
 
 ## Chat e agendamento do plano (`backend/chat.py`)
 
 | Rota | O que faz |
 |---|---|
-| `POST /calendar/events/{id}/concluir` | Marca uma etapa do plano como concluída, sem apagar o evento. Entrada: `{"tempo_gasto_minutos": 1 a 1440}`. O evento passa a vir com `"concluido": true` e `"tempo_gasto_minutos"`; o tempo entra na média de minutos por story point |
 | `POST /chat/stream` | Chat com o [Supervisor](supervisor.md). Entrada: `{"modelo", "sistema", "mensagens": [{"papel", "conteudo"}]}`. Saída: NDJSON |
 | `POST /chat/confirmar` | Clique em Sim ou Não. Entrada: `{"confirmado": true ou false}`. Saída: NDJSON. No chat web, texto digitado não confirma |
 | `POST /chat/reiniciar` | Zera as confirmações pendentes (nova conversa) |
@@ -44,8 +44,6 @@ Linhas do NDJSON de `/chat/stream`:
 |---|---|
 | `POST /projetos` | `{texto, prazo?}`: Planejador + story points ([`planejador.md`](planejador.md)). Erros: `422` (entrada ou prazo inválido, ou prazo que já passou), `502` (resposta da IA fora do contrato), `503` (Ollama ou serviço de story points fora do ar) |
 | `POST /prazos/interpretar` | Lê um prazo escrito em texto ("até amanhã", "20/12") |
-| `GET /tarefas` | Compromissos da agenda em uma janela (`inicio`, `fim`) |
-| `POST /historico` | Registra o tempo real de uma tarefa concluída (`id_evento`, `tempo_real_minutos`) na média histórica (`data/historico.json`). Os story points são buscados em `data/eventos.db`, tabela `eventos` |
 | `GET /calibracao`, `POST /calibracao` | As 10 tarefas da calibração e o envio dos tempos (ver README) |
 
 ## Perfil (`backend/perfil.py`)

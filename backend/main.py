@@ -22,7 +22,6 @@ from destrava.core.pomodoro import minutos_de_trabalho
 from destrava.core.prazo import interpretar_prazo
 from destrava.rag import obter_rag
 from backend.database import (
-    buscar_storypoints_evento,
     inicializar_banco_eventos,
     salvar_storypoints_eventos,
 )
@@ -184,28 +183,6 @@ def interpretar_prazo_do_texto(corpo: InterpretarPrazoRequest) -> dict[str, str 
     return {"prazo": _prazo_do_texto(corpo.texto)}
 
 
-class HistoricoTarefaRequest(BaseModel):
-    model_config = ConfigDict(strict=True)
-
-    id_evento: str
-    tempo_real_minutos: int
-
-    @field_validator("id_evento")
-    @classmethod
-    def validar_id_evento(cls, id_evento: str) -> str:
-        id_evento = id_evento.strip()
-        if not id_evento:
-            raise ValueError("O id do evento não pode ser vazio.")
-        return id_evento
-
-    @field_validator("tempo_real_minutos")
-    @classmethod
-    def validar_valor_nao_negativo(cls, valor: int) -> int:
-        if valor < 0:
-            raise ValueError("Os valores não podem ser negativos.")
-        return valor
-
-
 class ProjetoResponse(BaseModel):
     prazo: str
     tarefas: list[dict[str, Any]]
@@ -213,14 +190,6 @@ class ProjetoResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     status: str
-
-
-class TarefasResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
-    status: str
-    periodo: dict[str, Any] | None = None
-    tarefas: list[dict[str, Any]] | None = None
 
 
 class PerguntasCalibracaoResponse(BaseModel):
@@ -341,54 +310,6 @@ def _registrar_observacao(minutos_por_story_point: float) -> None:
 
 # Usada também ao concluir uma etapa no painel (backend/calendario.py).
 app.state.registrar_observacao = _registrar_observacao
-
-
-@app.post("/historico", response_model=StatusResponse, status_code=201)
-def registrar_historico(
-    historico: HistoricoTarefaRequest,
-) -> dict[str, str]:
-    story_points = buscar_storypoints_evento(historico.id_evento)
-    if story_points is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Não existe um registro de story points para este evento.",
-        )
-    if story_points <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="Os story points devem ser maiores que zero para compor a média.",
-        )
-
-    _registrar_observacao(historico.tempo_real_minutos / story_points)
-
-    return {"status": "sucesso"}
-
-
-@app.get("/tarefas", response_model=TarefasResponse)
-def listar_tarefas(
-    inicio: str,
-    fim: str,
-    request: Request,
-) -> dict[str, object]:
-    """Lista os compromissos da agenda dentro de uma janela de tempo."""
-    visualizador: AgenteVisualizar = request.app.state.visualizador
-    resposta = visualizador.executar_json(
-        {"inicio": inicio, "fim": fim},
-        incluir_ocupados=True,
-    )
-
-    if resposta["status"] == "erro":
-        return resposta
-
-    dados = resposta["dados"]
-    if dados is None or "ocupados" not in dados:
-        raise RuntimeError("O visualizador não retornou as tarefas ocupadas.")
-
-    return {
-        "status": resposta["status"],
-        "periodo": resposta["periodo"],
-        "tarefas": dados["ocupados"],
-    }
 
 
 perguntas = json.loads("""{
