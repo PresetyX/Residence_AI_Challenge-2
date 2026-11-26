@@ -104,4 +104,6 @@ export interface ChatMessage {
   statusText?: string;
   /** The request was settled in this turn: the next message starts a new conversation. */
   endsConversation?: boolean;
+  /** A yes/no question asked in this turn: "pending" shows the Sim and Não buttons. */
+  confirmation?: "pending" | "answered";
 }

@@ -5,7 +5,9 @@
  * backend Supervisor from the message itself ("até amanhã", "tenho uma semana", "20/12",
  * "em 3 meses"...). Without one, the plan is made anyway and the assistant asks only for
  * the deadline; the answer is read by the backend too. Then the assistant offers to place
- * the steps on the calendar (deadline class + preview) and creates them after a "sim".
+ * the steps on the calendar (deadline class + preview) and creates them after a "yes".
+ * Both questions are answered with the Sim and Não buttons (answerProjectPlanner):
+ * typed text never confirms anything.
  * Everything else (free slots, single events) stays with the Supervisor chat stream.
  */
 import { formatLongDate, formatShortDate, formatTimeRange } from "@/lib/format";
@@ -27,10 +29,10 @@ let pendingProject: { description: string; draft: ProjectPlan } | null = null;
 /** Project the planner did not understand (or the Supervisor asked for one): the next message adds details. */
 let awaitingDetails: { description: string; deadline: string | null } | null = null;
 
-/** Plan shown in the thread, waiting for "sim" to be placed on the calendar. */
+/** Plan shown in the thread, waiting for "Sim" to be placed on the calendar. */
 let pendingSchedule: { plan: ProjectPlan; goal: string } | null = null;
 
-/** Preview of the calendar slots shown; waiting for the final "sim" to create them. */
+/** Preview of the calendar slots shown; waiting for the final "Sim" to create them. */
 let awaitingConfirm = false;
 
 export function resetProjectPlanner(): void {
@@ -53,14 +55,37 @@ const SINGLE_ITEM = /\b(evento|compromisso|reuniao|lembrete|consulta)\b/;
 /** Calendar questions keep going to the Supervisor ("quais meus horários livres?"). */
 const CALENDAR = /\b(agenda|horarios?|livres?|ocupad\w*)\b/;
 
+/** True while a plan or a calendar preview waits for Sim or Não. */
+export function awaitingProjectAnswer(): boolean {
+  return awaitingConfirm || pendingSchedule !== null;
+}
+
+/** A click on Sim or Não for the pending plan or calendar preview. */
+export async function* answerProjectPlanner(
+  confirmed: boolean,
+  signal?: AbortSignal,
+): AsyncGenerator<InferenceChunk> {
+  if (awaitingConfirm) {
+    yield* confirmSchedule(confirmed, signal);
+    return;
+  }
+  if (!pendingSchedule) return;
+  if (!confirmed) {
+    pendingSchedule = null;
+    yield { type: "token", value: "Tudo bem, não mexi na sua agenda. O plano continua aqui no cartão." };
+    yield { type: "conversation_end" };
+    return;
+  }
+  yield* previewSchedule(pendingSchedule.plan, pendingSchedule.goal, signal);
+}
+
 /** Decides who answers this message: the planner flow (true) or the Supervisor stream. */
 export function routeToProjectPlanner(text: string): boolean {
   const t = normalize(text);
 
-  // A plan or a calendar preview is waiting for a yes/no: every message is ours
-  // (string check, no LLM) until the student says yes or no. projectPlannerStream
-  // asks again for anything else.
-  if (awaitingConfirm || pendingSchedule) return true;
+  // A plan or a calendar preview is waiting for the buttons: any typed message is
+  // ours, and projectPlannerStream just shows the buttons again.
+  if (awaitingProjectAnswer()) return true;
 
   // A project that mentions "agenda" or "consulta" is still a project.
   if (isProjectRequest(text)) return true;
@@ -123,30 +148,9 @@ export async function* projectPlannerStream(
   modelId: ModelId,
   signal?: AbortSignal,
 ): AsyncGenerator<InferenceChunk> {
-  if (awaitingConfirm) {
-    const verdict = classifyConfirmation(text);
-    if (verdict === null) {
-      yield { type: "token", value: "Não entendi. Responda **sim** para criar os eventos ou **não** para cancelar." };
-      return;
-    }
-    awaitingConfirm = false;
-    yield* confirmSchedule(verdict, signal);
-    return;
-  }
-  if (pendingSchedule) {
-    const verdict = classifyConfirmation(text);
-    if (verdict === null) {
-      yield { type: "token", value: "Não entendi. Responda **sim** para encaixar as etapas na agenda ou **não** para deixar como está." };
-      return;
-    }
-    const pending = pendingSchedule;
-    pendingSchedule = null;
-    if (!verdict) {
-      yield { type: "token", value: "Tudo bem, não mexi na sua agenda. O plano continua aqui no cartão." };
-      yield { type: "conversation_end" };
-      return;
-    }
-    yield* previewSchedule(pending.plan, pending.goal, signal);
+  if (awaitingProjectAnswer()) {
+    yield { type: "token", value: "Use os botões **Sim** ou **Não** para responder." };
+    yield { type: "confirmation_request" };
     return;
   }
 
@@ -213,9 +217,10 @@ function* offerPlan(plan: ProjectPlan, description: string): Generator<Inference
   pendingSchedule = { plan, goal: goalFromDescription(description) };
   yield {
     type: "token",
-    value: `${summarize(plan)}\n\nQuer que eu encaixe essas etapas nos seus horários livres do Google Agenda até **${longDate(plan.deadline)}**? Responda **sim** ou **não**.`,
+    value: `${summarize(plan)}\n\nQuer que eu encaixe essas etapas nos seus horários livres do Google Agenda até **${longDate(plan.deadline)}**?`,
   };
   yield { type: "project_plan", plan };
+  yield { type: "confirmation_request" };
 }
 
 const CLASS_LABEL = { tranquilo: "🟢 Prazo tranquilo", corrido: "🟡 Prazo corrido", impossivel: "🔴 Prazo impossível" };
@@ -228,6 +233,8 @@ async function* previewSchedule(
 ): AsyncGenerator<InferenceChunk> {
   yield { type: "status", value: "Classificando o prazo e procurando horários livres na sua agenda…" };
   const preview = await scheduleService.preview(plan, signal);
+  // Cleared only after the backend answered: a failed request can be retried.
+  pendingSchedule = null;
   const slots = preview.dados?.eventos ?? [];
   const kind = preview.classificacao ?? preview.dados?.classificacao;
   const heading = kind ? `**${CLASS_LABEL[kind]}.** ` : "";
@@ -251,15 +258,17 @@ async function* previewSchedule(
       "",
       ...lines,
       "",
-      `Responda **sim** para criar ${slots.length === 1 ? "o evento" : `os ${slots.length} eventos`} ou **não** para cancelar.`,
+      `Criar ${slots.length === 1 ? "este evento" : `estes ${slots.length} eventos`} na sua agenda?`,
     ].join("\n"),
   };
+  yield { type: "confirmation_request" };
 }
 
 /** Creates (or drops) the previewed slots; each created event becomes a calendar card. */
 async function* confirmSchedule(confirmed: boolean, signal?: AbortSignal): AsyncGenerator<InferenceChunk> {
   if (confirmed) yield { type: "status", value: "Criando os eventos no Google Agenda…" };
   const result = await scheduleService.confirm(confirmed, signal);
+  awaitingConfirm = false;
   yield { type: "token", value: result.mensagem };
   for (const dto of result.dados?.eventos_criados ?? []) {
     const snapshot = toCalendarEvent(dto);

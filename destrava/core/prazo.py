@@ -21,6 +21,7 @@ import unicodedata
 from datetime import date, datetime, timedelta
 
 from destrava.core import config
+from destrava.core.horario import tem_numero_negativo
 
 MESES = (
     "janeiro", "fevereiro", "marco", "abril", "maio", "junho",
@@ -84,6 +85,8 @@ def interpretar_prazo(texto: str, agora: datetime | None = None) -> date | None:
     """
     if not isinstance(texto, str) or not texto.strip():
         return None
+    if tem_numero_negativo(texto):
+        raise ValueError("O prazo não pode ser negativo. Informe uma data ou um tempo a partir de hoje.")
     hoje = (agora or datetime.now(config.FUSO)).date()
     t = _normalizar(texto)
 

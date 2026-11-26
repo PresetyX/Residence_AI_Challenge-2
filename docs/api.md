@@ -21,6 +21,7 @@ O frontend só fala com esta API. Erros de validação voltam como `422`; as rot
 | Rota | O que faz |
 |---|---|
 | `POST /chat/stream` | Chat com o [Supervisor](supervisor.md). Entrada: `{"modelo", "sistema", "mensagens": [{"papel", "conteudo"}]}`. Saída: NDJSON |
+| `POST /chat/confirmar` | Clique em Sim ou Não. Entrada: `{"confirmado": true ou false}`. Saída: NDJSON. No chat web, texto digitado não confirma |
 | `POST /chat/reiniciar` | Zera as confirmações pendentes (nova conversa) |
 | `POST /projetos/agendar` | `{prazo, tarefas}`: classifica o prazo e devolve a prévia, sem criar nada |
 | `POST /projetos/agendar/confirmar` | `{confirmado}`: cria os eventos da prévia (ou cancela) |

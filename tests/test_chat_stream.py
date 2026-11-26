@@ -50,7 +50,9 @@ def test_envia_ultima_mensagem_do_usuario_e_devolve_o_texto():
 
     assert supervisor.pedidos == ["Crie X amanhã das 13h às 14h"]
     assert linhas[0]["tipo"] == "status"
-    assert _texto(linhas) == "Confirma a criação? Responda 'sim' ou 'não'."
+    # Quem responde são os botões: a frase que pedia para digitar sai do texto.
+    assert _texto(linhas) == "Confirma a criação?"
+    assert {"tipo": "pedir_confirmacao"} in linhas
     assert not any(linha["tipo"] == "acao_agenda" for linha in linhas)
 
 
