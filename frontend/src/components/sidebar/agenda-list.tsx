@@ -1,10 +1,18 @@
 "use client";
 
-import { CalendarPlus, CalendarX2, ChevronRight, Hand, Sparkles } from "lucide-react";
+import {
+  CalendarPlus,
+  CalendarX2,
+  ChevronRight,
+  CircleCheck,
+  Hand,
+  Sparkles,
+} from "lucide-react";
 import { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { formatLongDate, formatTimeRange } from "@/lib/format";
 import type { CalendarEvent } from "@/lib/types";
+import { isPlanTask } from "@/services/contracts";
 import { useCalendarStore } from "@/store/calendar-store";
 import { useUiStore } from "@/store/ui-store";
 
@@ -69,9 +77,11 @@ export function AgendaList() {
                     <span
                       aria-hidden="true"
                       className={`h-10 w-1 shrink-0 rounded-full ${
-                        event.planGoal
-                          ? "bg-gradient-to-b from-violet-400 to-violet-700"
-                          : "bg-slate-500"
+                        event.completed
+                          ? "bg-emerald-400"
+                          : isPlanTask(event)
+                            ? "bg-gradient-to-b from-violet-400 to-violet-700"
+                            : "bg-slate-500"
                       }`}
                     />
                     <span className="min-w-0 flex-1">
@@ -83,7 +93,7 @@ export function AgendaList() {
                           {formatTimeRange(event.start, event.end)}
                         </span>
                         <span className="inline-flex items-center gap-1">
-                          {event.planGoal ? (
+                          {isPlanTask(event) ? (
                             <>
                               <Sparkles className="size-3 text-violet-400" aria-hidden="true" />
                               Plano
@@ -97,6 +107,15 @@ export function AgendaList() {
                         </span>
                       </span>
                     </span>
+                    {event.completed && (
+                      <>
+                        <CircleCheck
+                          className="size-5 shrink-0 text-emerald-400"
+                          aria-hidden="true"
+                        />
+                        <span className="sr-only">Concluída</span>
+                      </>
+                    )}
                     <ChevronRight
                       className="size-4 shrink-0 text-muted transition group-hover:translate-x-0.5 group-hover:text-white"
                       aria-hidden="true"

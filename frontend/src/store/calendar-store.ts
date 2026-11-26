@@ -17,6 +17,8 @@ interface CalendarState {
   updateEvent: (id: string, input: CalendarEventInput) => Promise<void>;
   /** Sends the payload the user confirmed in the delete modal, unchanged. */
   deleteEvent: (payload: DeleteEventPayload) => Promise<void>;
+  /** The student confirmed a plan step as done. */
+  completeEvent: (id: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -85,6 +87,15 @@ export const useCalendarStore = create<CalendarState>()((set, get) => ({
       set((state) => ({ deletedIds: { ...state.deletedIds, [payload.evento_id]: true } }));
     } catch (error) {
       throw new Error(toMessage(error, "Não foi possível excluir o agendamento."));
+    }
+  },
+
+  async completeEvent(id) {
+    try {
+      const saved = await calendarService.completeEvent(id);
+      set((state) => ({ events: { ...state.events, [saved.id]: saved } }));
+    } catch (error) {
+      throw new Error(toMessage(error, "Não foi possível marcar a tarefa como concluída."));
     }
   },
 

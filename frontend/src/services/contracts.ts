@@ -28,6 +28,8 @@ export interface EventDto {
   local?: string | null;
   /** Goal of the AI plan this slot belongs to, if any. */
   meta?: string | null;
+  /** Present (true) once the plan step was confirmed as done. */
+  concluido?: boolean;
 }
 
 export interface AgentResponseDto<TData> {
@@ -72,6 +74,7 @@ export function toCalendarEvent(dto: EventDto): CalendarEvent {
     syncStatus: "synced",
     updatedAt: new Date().toISOString(),
     planGoal: dto.meta ?? undefined,
+    completed: dto.concluido ?? false,
   };
 }
 
@@ -84,6 +87,10 @@ export function toEventWriteDto(input: CalendarEventInput): EventWriteDto {
     local: input.location,
   };
 }
+
+/** A calendar slot created from a plan step (the only ones that can be marked as done). */
+export const isPlanTask = (event: CalendarEvent): boolean =>
+  event.title.startsWith("[Destrava]") || Boolean(event.planGoal);
 
 /** Agents never raise: failures come back as `status: "erro"`. Convert them to ApiError. */
 export function unwrapAgentResponse<TData>(response: AgentResponseDto<TData>): TData {

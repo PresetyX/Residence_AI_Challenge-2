@@ -8,6 +8,8 @@ respostas de agenda seguem o envelope dos agentes (RespostaAgente):
     POST   /calendar/events            -> dados {evento: EventDto}  (agente criar)
     PUT    /calendar/events/{id}       -> dados {evento: EventDto}  (agente editar)
     DELETE /calendar/events/{id}       -> dados {evento_id}         (agente excluir)
+    POST   /calendar/events/{id}/concluir
+                                       -> dados {evento: EventDto}  (marca a etapa como feita)
 
     POST /auth/google/session {consent, scopes} -> {user, grantedScopes}
     POST /auth/logout                            -> 204
@@ -35,10 +37,15 @@ from pydantic import BaseModel
 
 from backend import perfil
 from destrava.tools.criar import AgenteCriar
-from destrava.tools.editar import AgenteEditar, evento_resumido
+from destrava.tools.editar import (
+    AgenteEditar,
+    alteracao_de_conclusao,
+    e_tarefa_do_plano,
+    evento_resumido,
+)
 from destrava.tools.excluir import AgenteExcluir
 from destrava.core import config
-from destrava.core.google_client import get_service, listar_eventos, obter_evento
+from destrava.core.google_client import atualizar_evento, get_service, listar_eventos, obter_evento
 from destrava.core.models import ErroInfo, Etapa, Fluxo, RespostaAgente
 
 router = APIRouter()
@@ -180,6 +187,28 @@ def editar(id_evento: str, evento: EventoEscrita) -> dict:
 def excluir(id_evento: str) -> dict:
     servico = _servico()
     return AgenteExcluir(servico=servico).executar_json({"id": id_evento})
+
+
+@router.post("/calendar/events/{id_evento}/concluir")
+def concluir(id_evento: str) -> dict:
+    """Marca uma etapa do plano como concluída. O evento continua na agenda."""
+    servico = _servico()
+    try:
+        bruto = obter_evento(servico, id_evento)
+        if bruto.get("status") == "cancelled":
+            raise HTTPException(status_code=404, detail="Agendamento não encontrado.")
+        if not e_tarefa_do_plano(bruto):
+            return _envelope_erro(
+                "tarefa_nao_concluida", "NaoEhTarefa",
+                "Só as etapas de um plano podem ser marcadas como concluídas.",
+            )
+        atualizado = atualizar_evento(servico, id_evento, alteracao_de_conclusao(bruto))
+    except HttpError as erro:
+        if getattr(erro.resp, "status", None) in (404, 410):
+            raise HTTPException(status_code=404, detail="Agendamento não encontrado.") from erro
+        return _envelope_erro("tarefa_nao_concluida", "HttpError", str(erro.reason))
+    evento = _converter_inicio_fim(evento_resumido(atualizado))
+    return _envelope_sucesso("tarefa_concluida", {"evento": evento})
 
 
 def _mensagem_amigavel(mensagem: str) -> str:
