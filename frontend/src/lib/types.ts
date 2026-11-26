@@ -46,6 +46,8 @@ export interface CalendarEvent {
   planGoal?: string;
   /** The student confirmed this plan step as done. The event stays on the calendar. */
   completed?: boolean;
+  /** Minutes the student said they spent on a completed step. */
+  spentMinutes?: number;
 }
 
 export type CalendarEventInput = Pick<

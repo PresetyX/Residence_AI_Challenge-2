@@ -20,7 +20,7 @@ O frontend só fala com esta API. Erros de validação voltam como `422`; as rot
 
 | Rota | O que faz |
 |---|---|
-| `POST /calendar/events/{id}/concluir` | Marca uma etapa do plano como concluída, sem apagar o evento. O evento passa a vir com `"concluido": true` |
+| `POST /calendar/events/{id}/concluir` | Marca uma etapa do plano como concluída, sem apagar o evento. Entrada: `{"tempo_gasto_minutos": 1 a 1440}`. O evento passa a vir com `"concluido": true` e `"tempo_gasto_minutos"`; o tempo entra na média de minutos por story point |
 | `POST /chat/stream` | Chat com o [Supervisor](supervisor.md). Entrada: `{"modelo", "sistema", "mensagens": [{"papel", "conteudo"}]}`. Saída: NDJSON |
 | `POST /chat/confirmar` | Clique em Sim ou Não. Entrada: `{"confirmado": true ou false}`. Saída: NDJSON. No chat web, texto digitado não confirma |
 | `POST /chat/reiniciar` | Zera as confirmações pendentes (nova conversa) |

@@ -73,3 +73,11 @@ export function createId(prefix: string): string {
       : Math.random().toString(36).slice(2, 14);
   return `${prefix}_${random}`;
 }
+
+/** 90 -> "1 h 30 min", 45 -> "45 min", 120 -> "2 h". */
+export function formatMinutes(total: number): string {
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  if (hours === 0) return `${minutes} min`;
+  return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
+}
