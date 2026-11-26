@@ -2,6 +2,7 @@
 
 import {
   AlignLeft,
+  Check,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -16,6 +17,8 @@ import {
 import type { ReactNode } from "react";
 import { formatDuration, formatLongDate, formatShortDate, formatTime } from "@/lib/format";
 import type { CalendarEvent, SyncStatus } from "@/lib/types";
+import { isPlanTask } from "@/services/contracts";
+import { useUiStore } from "@/store/ui-store";
 
 const SYNC_META: Record<
   SyncStatus,
@@ -59,10 +62,10 @@ export function EventDetails({ event }: { event: CalendarEvent }) {
           {formatLongDate(event.start)}
         </p>
         <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-purple-500/30 bg-violet-600/10 px-2.5 py-1 text-xs text-violet-200">
-          {event.planGoal ? (
+          {isPlanTask(event) ? (
             <>
               <Sparkles className="size-3.5" aria-hidden="true" />
-              Bloco do plano “{event.planGoal}”
+              {event.planGoal ? `Bloco do plano “${event.planGoal}”` : "Etapa de um plano"}
             </>
           ) : (
             <>
@@ -72,6 +75,8 @@ export function EventDetails({ event }: { event: CalendarEvent }) {
           )}
         </p>
       </div>
+
+      {isPlanTask(event) && <Completion done={event.completed ?? false} />}
 
       <div className="grid grid-cols-2 gap-3">
         <TimeBox label="Início" iso={event.start} />
@@ -121,6 +126,34 @@ export function EventDetails({ event }: { event: CalendarEvent }) {
         </a>
       )}
     </div>
+  );
+}
+
+/** Plan steps only: the button to mark it as done, or the green check once it is. */
+function Completion({ done }: { done: boolean }) {
+  const openConfirmation = useUiStore((state) => state.setCompleteModalOpen);
+
+  if (done) {
+    return (
+      <p
+        role="status"
+        className="flex items-center gap-2.5 rounded-2xl border border-emerald-400/40 bg-emerald-500/15 px-4 py-3 text-sm font-medium text-emerald-200"
+      >
+        <CircleCheck className="size-5 shrink-0 text-emerald-300" aria-hidden="true" />
+        Tarefa concluída
+      </p>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => openConfirmation(true)}
+      aria-haspopup="dialog"
+      className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-emerald-400/40 bg-emerald-500/10 text-sm font-medium text-emerald-100 transition hover:border-emerald-300/70 hover:bg-emerald-500/20"
+    >
+      <Check className="size-4" aria-hidden="true" />
+      Marcar como concluída
+    </button>
   );
 }
 

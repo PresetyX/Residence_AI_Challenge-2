@@ -100,11 +100,32 @@ def montar_alteracoes(pedido: PedidoEdicao) -> dict[str, Any]:
     return alteracoes
 
 
+# Prefixo do título dos blocos criados a partir de um plano (encaixe_pomodoro.py).
+PREFIXO_TAREFA = "[Destrava]"
+
+
+def e_tarefa_do_plano(evento: dict[str, Any]) -> bool:
+    """O evento do Google é uma etapa agendada pelo Destrava."""
+    privado = evento.get("extendedProperties", {}).get("private", {})
+    return (evento.get("summary") or "").startswith(PREFIXO_TAREFA) or bool(privado.get("meta"))
+
+
+def alteracao_de_conclusao(evento: dict[str, Any]) -> dict[str, Any]:
+    """Corpo do PATCH que marca a tarefa como feita, sem mexer em mais nada.
+
+    A marca fica no próprio evento (propriedade privada do app). As outras
+    propriedades privadas são reenviadas para não se perderem.
+    """
+    privado = evento.get("extendedProperties", {}).get("private", {})
+    return {"extendedProperties": {"private": {**privado, "concluido": "true"}}}
+
+
 def evento_resumido(evento: dict[str, Any]) -> dict[str, Any]:
     """Converte o evento bruto do Google para o formato dos agentes."""
     inicio = evento.get("start", {})
     fim = evento.get("end", {})
-    meta = evento.get("extendedProperties", {}).get("private", {}).get("meta")
+    privado = evento.get("extendedProperties", {}).get("private", {})
+    meta = privado.get("meta")
     resumo = {
         "id": evento.get("id"),
         "titulo": evento.get("summary") or "(sem título)",
@@ -116,6 +137,8 @@ def evento_resumido(evento: dict[str, Any]) -> dict[str, Any]:
     }
     if meta:
         resumo["meta"] = meta
+    if privado.get("concluido") == "true":
+        resumo["concluido"] = True
     return resumo
 
 

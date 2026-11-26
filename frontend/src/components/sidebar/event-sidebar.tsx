@@ -7,6 +7,7 @@ import { useDismiss } from "@/hooks/use-dismiss";
 import { useCalendarStore } from "@/store/calendar-store";
 import { type PanelView, useUiStore } from "@/store/ui-store";
 import { AgendaList } from "./agenda-list";
+import { CompleteEventModal } from "./complete-event-modal";
 import { DeleteEventModal } from "./delete-event-modal";
 import { EventDetails } from "./event-details";
 import { EventForm } from "./event-form";
@@ -31,6 +32,8 @@ export function EventSidebar() {
   const editActiveEvent = useUiStore((state) => state.editActiveEvent);
   const openEventDetails = useUiStore((state) => state.openEventDetails);
   const setDeleteModalOpen = useUiStore((state) => state.setDeleteModalOpen);
+  const isCompleteModalOpen = useUiStore((state) => state.isCompleteModalOpen);
+  const setCompleteModalOpen = useUiStore((state) => state.setCompleteModalOpen);
 
   const event = useCalendarStore((state) =>
     activeEventId && !state.deletedIds[activeEventId] ? state.events[activeEventId] : undefined,
@@ -59,7 +62,8 @@ export function EventSidebar() {
   }, [isOpen]);
 
   useEffect(() => {
-    if (!isOpen || isDeleteModalOpen) return;
+    // An open dialog handles Escape itself.
+    if (!isOpen || isDeleteModalOpen || isCompleteModalOpen) return;
     const onKeyDown = (keyEvent: globalThis.KeyboardEvent) => {
       if (keyEvent.key !== "Escape") return;
       if (view === "edit" || view === "create") goBack();
@@ -67,7 +71,7 @@ export function EventSidebar() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [isOpen, isDeleteModalOpen, view, goBack, close]);
+  }, [isOpen, isDeleteModalOpen, isCompleteModalOpen, view, goBack, close]);
 
   return (
     <>
@@ -152,6 +156,14 @@ export function EventSidebar() {
           </>
         )}
       </AnimatePresence>
+
+      {event && (
+        <CompleteEventModal
+          event={event}
+          open={isCompleteModalOpen}
+          onClose={() => setCompleteModalOpen(false)}
+        />
+      )}
 
       {event && (
         <DeleteEventModal

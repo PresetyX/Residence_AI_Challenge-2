@@ -17,6 +17,8 @@ export interface CalendarService {
   createEvent(input: CalendarEventInput, planGoal?: string): Promise<CalendarEvent>;
   updateEvent(id: string, input: CalendarEventInput): Promise<CalendarEvent>;
   deleteEvent(payload: DeleteEventPayload): Promise<void>;
+  /** Marks a plan step as done without removing the event. */
+  completeEvent(id: string): Promise<CalendarEvent>;
 }
 
 /** Builds the exact payload the delete confirmation modal shows and then sends. */
@@ -50,6 +52,7 @@ export function validateEventInput(input: CalendarEventInput): void {
 //   POST   /calendar/events          -> { evento: EventDto }   (acao: evento_criado)
 //   PUT    /calendar/events/:id      -> { evento: EventDto }   (acao: evento_editado)
 //   DELETE /calendar/events/:id      -> { evento_id: string }  (acao: evento_excluido)
+//   POST   /calendar/events/:id/concluir -> { evento: EventDto } (acao: tarefa_concluida)
 // ---------------------------------------------------------------------------
 
 type EventResponse = AgentResponseDto<{ evento: EventDto }>;
@@ -85,6 +88,13 @@ const httpCalendarService: CalendarService = {
       { method: "DELETE", body: JSON.stringify(payload) },
     );
     unwrapAgentResponse(response);
+  },
+  async completeEvent(id) {
+    const response = await request<EventResponse>(
+      `/calendar/events/${encodeURIComponent(id)}/concluir`,
+      { method: "POST" },
+    );
+    return toCalendarEvent(unwrapAgentResponse(response).evento);
   },
 };
 

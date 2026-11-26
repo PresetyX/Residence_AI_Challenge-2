@@ -44,6 +44,8 @@ export interface CalendarEvent {
   updatedAt: string;
   /** Goal this slot belongs to when it was scheduled by an AI plan; absent for manual events. */
   planGoal?: string;
+  /** The student confirmed this plan step as done. The event stays on the calendar. */
+  completed?: boolean;
 }
 
 export type CalendarEventInput = Pick<
