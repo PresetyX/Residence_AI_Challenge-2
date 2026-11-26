@@ -10,14 +10,15 @@ O Supervisor é a porta de entrada do chat. Ele recebe o pedido em texto livre, 
 
 | Pedido | Ação (`acao`) | O que acontece |
 |---|---|---|
-| Consultar horários ("o que tenho livre amanhã?") | `visualizar` | Chama o agente Visualizar e responde com os horários livres |
-| Criar um evento | `criar` | A LLM é a única etapa de interpretação (se faltar data ou horário, ou estiver ambíguo, ela devolve `esclarecer`). Depois o código valida (Pydantic, data futura, sono, agenda livre) e mostra a prévia com confirmação. Com o "sim", chama o agente Criar |
+| Consultar a agenda ("o que tenho livre?" / "o que tenho agendado?" / "há conflitos?") | `visualizar` | Escolhe horários livres, eventos marcados ou sobreposições conforme o pedido; uma data sem horário consulta o dia inteiro |
+| Criar um evento | `criar` | A LLM interpreta o pedido; o código valida os dados, data futura, sono e disponibilidade, e pede confirmação antes de chamar Criar |
+| Editar um evento | `editar` | Localiza pelo título e data originais; se houver um único resultado, mostra as alterações e pede confirmação antes de chamar Editar |
+| Excluir um evento | `excluir` | Localiza pelo título e data originais; se houver um único resultado, pede confirmação antes de chamar Excluir |
 | Agendar o plano de um projeto | `planejar` | Feito pelas rotas `POST /projetos/agendar` e `/confirmar` (abaixo), não pelo texto do chat |
 | Pedido incompleto | `esclarecer` | Devolve uma pergunta ao usuário |
 | Fora do escopo | `fora_escopo` | O Supervisor responde "Não entendi. Você quer criar um evento, visualizar sua agenda ou planejar um projeto?" e a próxima mensagem segue o roteamento normal |
-| Editar ou excluir | (`indisponivel`) | Ainda não passam pelo Supervisor: o chat oferece o painel Agenda, que usa os agentes Editar e Excluir ([`editar.md`](editar.md), [`excluir.md`](excluir.md)) |
 
-O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente` ou `cronograma_pendente`). Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.
+O Supervisor interpreta só a **última mensagem** (sem histórico) e guarda **uma** confirmação pendente por vez (`evento_pendente`, `operacao_pendente` ou `cronograma_pendente`). Edição e exclusão exigem título e data de início originais; se houver mais de um evento com o mesmo título na data, o usuário informa também o horário de início. Para visualizar conflitos, ele lista os eventos envolvidos e o intervalo de sobreposição. Por isso o backend mantém uma instância por processo, com lock: uso local, uma pessoa por backend.
 
 ## Resposta
 
@@ -54,7 +55,7 @@ Fluxo de `preparar_agendamento` e `confirmar_agendamento`:
 
 ## Dependências
 
-- `tools/visualizar.py`, `tools/criar.py`, `agents/planejador.py` (`PedidoNaoEntendido`).
+- `tools/visualizar.py`, `tools/criar.py`, `tools/editar.py`, `tools/excluir.py`, `agents/planejador.py` (`PedidoNaoEntendido`).
 - `core/llm_client.py` (`perguntar`, `extrair_json`), `core/prazo.py`, `core/encaixe_pomodoro.py`, `core/pomodoro.py`, `core/config.py`.
 - Quem chama: `backend/chat.py` ([`api.md`](api.md)).
 
@@ -69,5 +70,5 @@ Os testes simulam o Google e o Ollama. Scripts manuais (precisam do Ollama): `py
 ## Limitações
 
 - Não guarda histórico nem mais de uma confirmação pendente.
-- Editar e excluir por texto ainda não existem.
-- O LLM pequeno pode errar a interpretação: por isso, depois da interpretação da LLM (única etapa, sem pré-checagem por texto), o Supervisor valida os dados por código (`PedidoCriacao`, data futura, horário de sono, agenda livre) e sempre pede confirmação antes de criar.
+- Edição e exclusão localizam pelo título e data informados; correspondências incertas pedem esclarecimento, nunca executam automaticamente.
+- O LLM pequeno pode errar a interpretação: depois da interpretação, o Supervisor valida por código (`PedidoCriacao`, data futura, horário de sono e agenda livre) e sempre pede confirmação antes de criar.

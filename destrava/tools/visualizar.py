@@ -73,7 +73,10 @@ class AgenteVisualizar:
     """Agente de visualização: ocupados, livres e conflitos de um período."""
 
     def executar_json(
-        self, entrada: dict | str, incluir_ocupados: bool = False
+        self,
+        entrada: dict | str,
+        incluir_ocupados: bool = False,
+        incluir_conflitos: bool = False,
     ) -> dict:
         """Recebe o período em JSON e devolve os horários livres em JSON.
 
@@ -89,6 +92,8 @@ class AgenteVisualizar:
               fica "erro" no fluxo e as seguintes ficam "pendente".
             incluir_ocupados: inclui os blocos ocupados em ``dados`` quando
                 verdadeiro. O padrão preserva o contrato original.
+            incluir_conflitos: inclui os pares de eventos sobrepostos em
+                ``dados`` quando verdadeiro. O padrão preserva o contrato.
         """
         # 0. Cria o fluxo com as 3 etapas ainda pendentes.
         fluxo = Fluxo(
@@ -140,6 +145,8 @@ class AgenteVisualizar:
         }
         if incluir_ocupados:
             dados["ocupados"] = resultado["ocupados"]
+        if incluir_conflitos:
+            dados["conflitos"] = resultado["conflitos"]
 
         return RespostaAgente(
             status="sucesso",

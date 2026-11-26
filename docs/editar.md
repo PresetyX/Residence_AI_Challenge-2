@@ -6,7 +6,7 @@
 
 Altera um evento existente do Google Agenda. Recebe o **ID** do evento e só os campos que mudam, em JSON, confere o evento no Google, aplica a alteração e devolve o evento atualizado em JSON. **Não usa LLM** e não interpreta texto livre: quem sabe qual é o evento (o painel Agenda do frontend) já manda o ID.
 
-Por enquanto o Supervisor não chama este agente: pedidos de edição no chat voltam como `indisponivel` e o chat oferece o painel manual.
+O Supervisor localiza o evento pelo título e data originais, mostra os dados da edição e só chama este agente depois de uma confirmação explícita ("sim"). Se mais de um evento corresponder, pede o horário de início antes de prosseguir. O painel Agenda também chama este agente diretamente após o usuário salvar o formulário.
 
 ## Contrato
 
@@ -41,7 +41,7 @@ Campos ausentes ficam como estão no Google (o agente envia só o que mudou).
 
 ## Quem chama
 
-`PUT /calendar/events/{id}` (`backend/calendario.py`), usado pelo painel Agenda do frontend. Ver [`api.md`](api.md).
+`AgenteSupervisor` no chat e `PUT /calendar/events/{id}` (`backend/calendario.py`) no painel Agenda do frontend. Ver [`supervisor.md`](supervisor.md) e [`api.md`](api.md).
 
 ## Dependências do core
 

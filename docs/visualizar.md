@@ -13,7 +13,7 @@ Classe `AgenteVisualizar` em `destrava/tools/visualizar.py`.
 
 | Método | Entrada | Saída | Uso |
 |---|---|---|---|
-| `executar_json(entrada)` | dict ou string JSON com `inicio` e `fim` | dicionário com a resposta padrão (abaixo) | Supervisor e `cli.py` |
+| `executar_json(entrada, incluir_ocupados=False, incluir_conflitos=False)` | dict ou string JSON com `inicio` e `fim` | dicionário com a resposta padrão (abaixo) | Supervisor e `cli.py` |
 | `executar(inicio, fim)` | período em `datetime` | dicionário com ocupados, livres, conflitos e totais | uso interno e `scripts/teste_visualizar.py` |
 
 ### Entrada
@@ -112,7 +112,7 @@ Regras do fluxo:
 - **Conflito:** dois eventos se sobrepõem quando `inicio_A < fim_B` e `inicio_B < fim_A`.
 - **Livre:** lacuna sem eventos, fora do sono, com duração mínima `DURACAO_MINIMA_LIVRE`.
 
-**O que o JSON devolve:** por enquanto só `livres` e `total_minutos_livres`. Ocupados, conflitos e `total_minutos_ocupados` são calculados pelo `executar`, mas não saem em `executar_json`.
+**O que o JSON devolve:** por padrão, só `livres` e `total_minutos_livres`, preservando o contrato usado pelo Planejador. Com `incluir_ocupados=True`, também devolve `ocupados`. Com `incluir_conflitos=True`, devolve `conflitos` com os IDs dos eventos e o intervalo de sobreposição; o chamador pode pedir também `incluir_ocupados=True` para identificar os títulos envolvidos. `total_minutos_ocupados` continua disponível somente em `executar`.
 
 Os valores (horários, duração mínima, fuso) estão em `destrava/core/config.py`.
 

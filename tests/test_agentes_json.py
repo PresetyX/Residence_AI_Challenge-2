@@ -202,6 +202,34 @@ def test_visualizar_json_devolve_envelope_de_sucesso():
     json.dumps(saida)  # a saída é serializável
 
 
+def test_visualizar_json_pode_incluir_conflitos_sob_demanda():
+    inicio = _amanha(10)
+    eventos = [
+        {**_evento_google(inicio, inicio + timedelta(hours=2), "Reunião"), "id": "a"},
+        {
+            **_evento_google(inicio + timedelta(hours=1), inicio + timedelta(hours=3), "Aula"),
+            "id": "b",
+        },
+    ]
+
+    with patch.object(visualizar, "get_service"), \
+         patch.object(visualizar, "listar_eventos", return_value=eventos):
+        saida = visualizar.AgenteVisualizar().executar_json(
+            {"inicio": _amanha(0).isoformat(), "fim": (_amanha(0) + timedelta(days=1)).isoformat()},
+            incluir_ocupados=True,
+            incluir_conflitos=True,
+        )
+
+    assert saida["status"] == "sucesso"
+    assert saida["dados"]["conflitos"] == [{
+        "ids_eventos": ["a", "b"],
+        "inicio_sobreposicao": (inicio + timedelta(hours=1)).isoformat(),
+        "fim_sobreposicao": (inicio + timedelta(hours=2)).isoformat(),
+    }]
+    assert [evento["id"] for evento in saida["dados"]["ocupados"] if evento["tipo"] == "evento"] == ["a", "b"]
+    json.dumps(saida)
+
+
 def test_visualizar_json_inicio_igual_ao_fim_vira_dia_inteiro():
     dia = _amanha(0).date().isoformat()
 

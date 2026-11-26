@@ -89,6 +89,15 @@ def simular_criador():
     return criador
 
 
+def simular_eventos(eventos):
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"ocupados": eventos},
+    }
+    return visualizador
+
+
 # TESTE 1 - Verifica a consulta da agenda.
 def test_visualizar_encaminha_json_ao_agente():
     evento = evento_teste()
@@ -113,6 +122,152 @@ def test_visualizar_encaminha_json_ao_agente():
     assert resposta["acao"] == "visualizar"
 
     visualizador.executar_json.assert_called_once()
+
+
+def test_visualizar_eventos_marcados_pede_ocupados_e_omite_blocos_de_sono():
+    evento = evento_teste()
+    inicio = datetime.fromisoformat(evento["inicio"]).replace(hour=0)
+    fim = inicio + timedelta(days=1)
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {
+            "livres": [],
+            "total_minutos_livres": 0,
+            "ocupados": [
+                {
+                    "id": "e1",
+                    "titulo": "Reunião",
+                    "inicio": evento["inicio"],
+                    "fim": evento["fim"],
+                    "tipo": "evento",
+                },
+                {
+                    "id": "sono",
+                    "titulo": "Sono",
+                    "inicio": inicio.isoformat(),
+                    "fim": (inicio + timedelta(hours=8)).isoformat(),
+                    "tipo": "sono",
+                },
+            ],
+        },
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "tipo": "eventos"},
+        ),
+    )
+
+    resposta = supervisor.executar("O que tenho agendado amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Reunião" in resposta["mensagem"]
+    assert "Sono" not in resposta["mensagem"]
+    assert [evento["id"] for evento in resposta["dados"]["eventos"]] == ["e1"]
+    visualizador.executar_json.assert_called_once_with(
+        {"inicio": inicio.isoformat(), "fim": fim.isoformat()},
+        incluir_ocupados=True,
+    )
+
+
+def test_visualizar_conflitos_mostra_intervalo_e_eventos_envolvidos():
+    inicio = datetime.fromisoformat(evento_teste()["inicio"])
+    fim = inicio + timedelta(hours=1)
+    evento_a = {
+        "id": "a",
+        "titulo": "Reunião",
+        "inicio": inicio.isoformat(),
+        "fim": (inicio + timedelta(hours=2)).isoformat(),
+        "tipo": "evento",
+    }
+    evento_b = {
+        "id": "b",
+        "titulo": "Aula",
+        "inicio": fim.isoformat(),
+        "fim": (fim + timedelta(hours=2)).isoformat(),
+        "tipo": "evento",
+    }
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {
+            "ocupados": [evento_a, evento_b],
+            "conflitos": [{
+                "ids_eventos": ["a", "b"],
+                "inicio_sobreposicao": fim.isoformat(),
+                "fim_sobreposicao": (inicio + timedelta(hours=2)).isoformat(),
+            }],
+        },
+    }
+    periodo_inicio = inicio.replace(hour=0, minute=0)
+    periodo_fim = periodo_inicio + timedelta(days=1)
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {
+                "inicio": periodo_inicio.isoformat(),
+                "fim": periodo_fim.isoformat(),
+                "tipo": "conflitos",
+            },
+        ),
+    )
+
+    resposta = supervisor.executar("Quais eventos estão em conflito amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Reunião e Aula" in resposta["mensagem"]
+    assert "das 11:00 às 12:00" in resposta["mensagem"]
+    assert resposta["dados"]["conflitos"][0]["eventos"] == [evento_a, evento_b]
+    visualizador.executar_json.assert_called_once_with(
+        {"inicio": periodo_inicio.isoformat(), "fim": periodo_fim.isoformat()},
+        incluir_ocupados=True,
+        incluir_conflitos=True,
+    )
+
+
+def test_visualizar_conflitos_informa_quando_nao_ha_sobreposicoes():
+    inicio = datetime.fromisoformat(evento_teste()["inicio"]).replace(hour=0, minute=0)
+    fim = inicio + timedelta(days=1)
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"ocupados": [], "conflitos": []},
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=visualizador,
+        consultar_llm=simular_llm(
+            "visualizar",
+            {"inicio": inicio.isoformat(), "fim": fim.isoformat(), "tipo": "conflitos"},
+        ),
+    )
+
+    resposta = supervisor.executar("Tenho algum evento em conflito amanhã?")
+
+    assert resposta["status"] == "sucesso"
+    assert "Não encontrei eventos em conflito" in resposta["mensagem"]
+    assert resposta["dados"] == {"conflitos": []}
+
+
+def test_consulta_do_planejador_mantem_visualizacao_de_horarios_livres():
+    visualizador = MagicMock()
+    visualizador.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"livres": [], "total_minutos_livres": 0},
+    }
+    prazo = (datetime.now(config.FUSO).date() + timedelta(days=3)).isoformat()
+    supervisor = AgenteSupervisor(visualizador=visualizador)
+
+    resposta = supervisor.consultar_periodos_projeto(
+        prazo,
+        tarefas=[{"etapa": 1, "titulo": "Tarefa"}],
+    )
+
+    assert resposta["status"] == "sucesso"
+    visualizador.executar_json.assert_called_once()
+    assert visualizador.executar_json.call_args.kwargs == {}
 
 
 # TESTE 2 - Verifica pedidos sem informações suficientes.
@@ -298,6 +453,173 @@ def test_datas_invalidas_nao_consultam_google():
     assert resposta["status"] == "esclarecimento"
 
     visualizador.executar_json.assert_not_called()
+
+
+def test_edicao_localiza_evento_e_so_edita_apos_confirmacao():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-1",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    editor = MagicMock()
+    editor.executar_json.return_value = {
+        "status": "sucesso",
+        "dados": {"evento": {**evento_agenda, "titulo": "Reunião atualizada"}},
+    }
+    dados = {
+        "titulo_evento": "Reunião",
+        "data_evento": evento["inicio"][:10],
+        "alteracoes": {"titulo": "Reunião atualizada"},
+    }
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        editor=editor,
+        consultar_llm=simular_llm("editar", dados),
+    )
+
+    confirmacao = supervisor.executar("Mude a reunião de amanhã para Reunião atualizada")
+    assert confirmacao["status"] == "confirmacao"
+    editor.executar_json.assert_not_called()
+
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    assert resposta["acao"] == "editar"
+    editor.executar_json.assert_called_once_with({"id": "evt-1", "titulo": "Reunião atualizada"})
+
+
+def test_exclusao_cancela_sem_chamar_agente():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-2",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    excluidor = MagicMock()
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("não")
+    assert resposta["status"] == "cancelado"
+    excluidor.executar_json.assert_not_called()
+
+
+def test_exclusao_chama_agente_apos_confirmacao():
+    evento = evento_teste()
+    evento_agenda = {
+        "id": "evt-3",
+        "titulo": evento["titulo"],
+        "inicio": evento["inicio"],
+        "fim": evento["fim"],
+        "tipo": "evento",
+    }
+    excluidor = MagicMock()
+    excluidor.executar_json.return_value = {"status": "sucesso"}
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos([evento_agenda]),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    assert resposta["acao"] == "excluir"
+    excluidor.executar_json.assert_called_once_with({"id": "evt-3"})
+
+
+def test_eventos_ambiguos_pedem_horario_sem_escrever_na_agenda():
+    evento = evento_teste()
+    inicio_segundo = datetime.fromisoformat(evento["inicio"]) + timedelta(hours=2)
+    fim_segundo = datetime.fromisoformat(evento["fim"]) + timedelta(hours=2)
+    eventos = [
+        {
+            "id": "evt-1",
+            "titulo": evento["titulo"],
+            "inicio": evento["inicio"],
+            "fim": evento["fim"],
+            "tipo": "evento",
+        },
+        {
+            "id": "evt-2",
+            "titulo": evento["titulo"],
+            "inicio": inicio_segundo.isoformat(),
+            "fim": fim_segundo.isoformat(),
+            "tipo": "evento",
+        },
+    ]
+    excluidor = MagicMock()
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos(eventos),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {"titulo_evento": "Reunião", "data_evento": evento["inicio"][:10]},
+        ),
+    )
+
+    resposta = supervisor.executar("Exclua a reunião de amanhã")
+    assert resposta["status"] == "esclarecimento"
+    assert "horário de início" in resposta["mensagem"]
+    excluidor.executar_json.assert_not_called()
+
+
+def test_horario_do_evento_desambigua_a_exclusao():
+    evento = evento_teste()
+    inicio_segundo = datetime.fromisoformat(evento["inicio"]) + timedelta(hours=2)
+    fim_segundo = datetime.fromisoformat(evento["fim"]) + timedelta(hours=2)
+    eventos = [
+        {
+            "id": "evt-1",
+            "titulo": evento["titulo"],
+            "inicio": evento["inicio"],
+            "fim": evento["fim"],
+            "tipo": "evento",
+        },
+        {
+            "id": "evt-2",
+            "titulo": evento["titulo"],
+            "inicio": inicio_segundo.isoformat(),
+            "fim": fim_segundo.isoformat(),
+            "tipo": "evento",
+        },
+    ]
+    excluidor = MagicMock()
+    excluidor.executar_json.return_value = {"status": "sucesso"}
+    supervisor = AgenteSupervisor(
+        visualizador=simular_eventos(eventos),
+        excluidor=excluidor,
+        consultar_llm=simular_llm(
+            "excluir",
+            {
+                "titulo_evento": "Reunião",
+                "data_evento": evento["inicio"][:10],
+                "hora_evento": inicio_segundo.strftime("%H:%M"),
+            },
+        ),
+    )
+
+    confirmacao = supervisor.executar("Exclua a reunião de amanhã das 12h")
+    assert confirmacao["status"] == "confirmacao"
+    resposta = supervisor.executar("sim")
+    assert resposta["status"] == "sucesso"
+    excluidor.executar_json.assert_called_once_with({"id": "evt-2"})
 
 
 # ------------------------------------------------- LLM é a única interpretação

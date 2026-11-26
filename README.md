@@ -16,7 +16,7 @@ O sistema tem três partes:
 | Criar | Pronto: recebe título, início e fim em JSON e cria o evento |
 | Editar | Pronto: recebe o ID do evento e os campos que mudam, em JSON (sem LLM) |
 | Excluir | Pronto: recebe o ID do evento em JSON e exclui (a confirmação vem antes, no chat ou no painel) |
-| Supervisor | Pronto para consultar horários, criar eventos e agendar o plano de um projeto (LLM, leitura de prazo, Pomodoro e confirmação). Editar e excluir ainda não passam pelo chat: o chat oferece o painel Agenda ([`docs/supervisor.md`](docs/supervisor.md)) |
+| Supervisor | Pronto para consultar horários, criar, editar e excluir eventos por chat, e agendar o plano de um projeto (LLM, leitura de prazo, Pomodoro e confirmação; edições/exclusões também pedem confirmação) ([`docs/supervisor.md`](docs/supervisor.md)) |
 | Planejador | Pronto: transforma a descrição de um projeto em etapas com story points, usando o RAG ([`docs/planejador.md`](docs/planejador.md)) |
 | RAG (Supervisor e Planejador) | Máquina pronta, com LangChain (chunking, embeddings, banco vetorial Chroma, busca, prompt e geração). A base do Planejador tem conteúdo; a do Supervisor aguarda (ver [`docs/rag.md`](docs/rag.md)) |
 
